@@ -1,0 +1,8 @@
+{
+  "image": "ghcr.io/m0mms/gpu-probe",
+  "tag": "qualification-20261022",
+  "expected_manifest": "sha256:f40fb0c91f94d4aee25747c5880bad7236df56c3d856f24630cb5f19cac0a00c",
+  "platform": "linux/amd64",
+  "source_release": "https://github.com/m0mms/gpu-probe/releases/tag/qualification-20261022",
+  "license_scope": "LICENSE-SCOPE.json"
+}
