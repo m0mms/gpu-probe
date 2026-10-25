@@ -6,7 +6,15 @@ A minimal container worker for synthetic registration and capability probes. It 
 
 The ten custom worker files under `context/` are covered by the scoped MIT license in `LICENSE` and `LICENSE-SCOPE.json`. Debian, Python, OpenSSH and other bundled components retain their own licenses and copyright notices. The container as a whole is not MIT licensed. Bundled package notices remain in the image.
 
-`SOURCES.json` maps the 123 binary package versions to 84 source-package versions and lists 267 corresponding source files, with sizes, SHA-256 hashes and release locations. `SHA256SUMS.sources` checks those unmodified release assets. Upstream snapshot links provide provenance; the release assets provide the distributor-hosted source copy.
+`SOURCES.json` maps the 123 binary package versions to 84 source-package versions and lists 267 corresponding source files, with sizes, SHA-256 hashes and release locations. 259 files are flat release assets; eight filenames containing `~` are preserved inside `source-filenames-qualification-20261022.tar`. `SOURCES.json` supplies the archive hash and member mapping. Download the archive and the 259 flat files into one source directory. Verify the archive with:
+
+```sh
+printf '%s  %s\n' f0eeefb758c0c27f5b076b7b6e8c4d00bd22b4ced7d3b49511071e91bfa821b2 source-filenames-qualification-20261022.tar | sha256sum -c -
+tar -xf source-filenames-qualification-20261022.tar
+sha256sum -c SHA256SUMS.sources
+```
+
+The last command checks all 267 unmodified source files under their original names. The normalized `debianutils_5.7-0.5.deb12u1.debian.tar.xz` duplicate is retained as historical transport evidence and is not part of the canonical inventory. The original Git tag remains unchanged and predates this retrieval correction; the release description links the corrected inventory by immutable commit. Upstream snapshot links provide provenance; the release assets provide the distributor-hosted source copy.
 
 ## Image and build reference
 
