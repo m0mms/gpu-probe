@@ -1,0 +1,30 @@
+name: Diagnose qualification preflight
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: gpu-probe-diagnostic-20261026
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    if: github.repository == 'm0mms/gpu-probe' && github.ref == 'refs/heads/main' && github.sha == vars.GPU_PROBE_DIAGNOSTIC_SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch and verify reviewed diagnostic
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          gh api "repos/m0mms/gpu-probe/contents/tools/diagnose.py?ref=$GITHUB_SHA" -H 'Accept: application/vnd.github.raw+json' > "$RUNNER_TEMP/diagnose.py"
+          printf '%s  %s\n' '854fe310b3de4fdaa7bd6b394dfc2f5e6edff0399851f093681814a9497e0d40' "$RUNNER_TEMP/diagnose.py" | sha256sum -c -
+      - name: Nonpublishing pre-registry diagnostic
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIAGNOSTIC_APPROVED_SHA: ${{ vars.GPU_PROBE_DIAGNOSTIC_SHA }}
+        shell: bash
+        run: python3 "$RUNNER_TEMP/diagnose.py"
