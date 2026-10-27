@@ -1,0 +1,30 @@
+name: Diagnose pinned Skopeo pull
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: gpu-probe-pull-diagnostic-20261027
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    if: github.repository == 'm0mms/gpu-probe' && github.ref == 'refs/heads/main' && github.sha == vars.GPU_PROBE_PULL_DIAGNOSTIC_SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch and verify reviewed diagnostic
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          gh api "repos/m0mms/gpu-probe/contents/tools/diagnose_skopeo_pull.py?ref=$GITHUB_SHA" -H 'Accept: application/vnd.github.raw+json' > "$RUNNER_TEMP/diagnose_skopeo_pull.py"
+          printf '%s  %s\n' '6b54f11d1bd9a4d395bee88c94fc4800210bed5b13b4052f72f28c63111e46bf' "$RUNNER_TEMP/diagnose_skopeo_pull.py" | sha256sum -c -
+      - name: Nonpublishing pinned pull diagnostic
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_DIAGNOSTIC_APPROVED_SHA: ${{ vars.GPU_PROBE_PULL_DIAGNOSTIC_SHA }}
+        shell: bash
+        run: python3 "$RUNNER_TEMP/diagnose_skopeo_pull.py"
