@@ -1,0 +1,40 @@
+name: Publish qualification using distribution Skopeo
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  packages: write
+concurrency:
+  group: gpu-probe-qualification-20261022
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'm0mms/gpu-probe' && github.ref == 'refs/heads/main' && github.sha == vars.GPU_PROBE_NATIVE_PUBLISH_SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Install distribution Skopeo
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends skopeo
+          dpkg-query -W -f='${Package} ${Version}\n' skopeo
+      - name: Fetch and verify reviewed publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          gh api "repos/m0mms/gpu-probe/contents/tools/publish_native.py?ref=$GITHUB_SHA" -H 'Accept: application/vnd.github.raw+json' > "$RUNNER_TEMP/publish.py"
+          printf '%s  %s\n' '534075f1c04307131393cb26a713adb1380342b26e14886c6a729d565068fc9c' "$RUNNER_TEMP/publish.py" | sha256sum -c -
+      - name: Publish exact existing image once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVED_SHA: ${{ vars.GPU_PROBE_NATIVE_PUBLISH_SHA }}
+          SOURCES_VERIFIED_MANIFEST: ${{ vars.GPU_PROBE_VERIFIED_SOURCES_MANIFEST }}
+          EXPECTED_SOURCES_MANIFEST: 'ace66634230399aa19bb7fcc630532d65bd47826cd7d3b81b06171f80a820e27'
+        shell: bash
+        run: python3 "$RUNNER_TEMP/publish.py"
