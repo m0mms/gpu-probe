@@ -1,0 +1,37 @@
+name: Diagnose native archive inspection
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: gpu-probe-native-inspection-20261028
+  cancel-in-progress: false
+jobs:
+  diagnose:
+    if: github.repository == 'm0mms/gpu-probe' && github.ref == 'refs/heads/main' && github.sha == vars.GPU_PROBE_NATIVE_INSPECTION_SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Install distribution Skopeo
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends skopeo
+          dpkg-query -W -f='${Package} ${Version}\n' skopeo
+      - name: Fetch and verify reviewed diagnostic
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          gh api "repos/m0mms/gpu-probe/contents/tools/diagnose_native.py?ref=$GITHUB_SHA" -H 'Accept: application/vnd.github.raw+json' > "$RUNNER_TEMP/diagnose_native.py"
+          printf '%s  %s\n' '7e14beea7ebde9e71a91c56bc194f6afdac00c8f703e516d5fc85f5717702fbb' "$RUNNER_TEMP/diagnose_native.py" | sha256sum -c -
+      - name: Inspect verified archive without credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NATIVE_INSPECTION_APPROVED_SHA: ${{ vars.GPU_PROBE_NATIVE_INSPECTION_SHA }}
+        shell: bash
+        run: python3 "$RUNNER_TEMP/diagnose_native.py"
