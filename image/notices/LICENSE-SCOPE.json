@@ -1,0 +1,17 @@
+{
+  "license": "MIT",
+  "scope": "Only the custom worker files listed here and the accompanying license/scope notice. This is not a license for the entire container image or for unrelated repositories and materials.",
+  "files": {
+    "/opt/gpu-probe/paid_probe/__init__.py": "f11a16b3103d881c4f8674c0bcf83dda2182c4a6b6ea237d6f4cca64394f6975",
+    "/opt/gpu-probe/paid_probe/capability_worker.py": "d3bf6f29be6fae7c4766d5593023eb393d9043e3b1cea3cce4dc2d5db74e3ae8",
+    "/opt/gpu-probe/paid_probe/protocol.py": "60289319eb966b106d197b813da1f0b876f3fe3dc705a8952503137453a96b1d",
+    "/opt/gpu-probe/paid_probe/worker_probe.py": "d50d371fca16741a11e618b5118075cef78cbd40d12b64a08b11e24127c14955",
+    "/opt/gpu-probe/entry.py": "f1397a03e4295b90124930802c4537cd4b313b80035e6dec1309b70f9ec7358c",
+    "/opt/gpu-probe/startup.py": "0f5220dbb306404d7417090baca089e3d1dc9890d1a776a2884a14eb840c67b3",
+    "/opt/gpu-probe/registration_input.py": "2e698d9d81c61bd38453cd4bc06f7b5d04c2822217807f6db60f590d463b795d",
+    "/opt/gpu-probe/identity.py": "335eb7f5465625212b6aae8a7e2b217d6f32fecdf7992ead66cfc44ba1e6b6e3",
+    "/usr/local/libexec/gpu-paid-worker": "d3e25031ec4729100a00513529b8c26beb8f5cad59a3ee4b4d675946819cd509",
+    "/etc/ssh/sshd_config_probe": "ea1713289c393a949a36265fc7e6ef07efeb7dafef0afd362279f3f45abfec3c"
+  },
+  "third_party": "Operating-system packages, Python, OpenSSH and other bundled components retain their respective licenses and notices. No rights in those components are granted by this custom-worker license."
+}

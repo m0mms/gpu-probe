@@ -1,0 +1,33 @@
+# Unactivated candidate; target-image sshd -t/-T qualification required.
+Port 22
+AddressFamily inet
+ListenAddress 0.0.0.0
+HostKey /run/gpu-bootstrap-identity/ssh_host_ed25519_key
+PidFile /run/gpu-bootstrap-identity/sshd.pid
+AuthorizedKeysFile /run/gpu-bootstrap-identity/authorized_keys
+StrictModes yes
+AllowUsers gpu-probe
+PermitRootLogin no
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+UsePAM no
+HostbasedAuthentication no
+PermitUserEnvironment no
+PermitUserRC no
+PermitTTY no
+DisableForwarding yes
+AllowAgentForwarding no
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+X11Forwarding no
+PermitTunnel no
+GatewayPorts no
+MaxAuthTries 2
+MaxSessions 1
+MaxStartups 1
+LoginGraceTime 20
+LogLevel QUIET
+ForceCommand /usr/local/libexec/gpu-paid-worker --stdio-v1

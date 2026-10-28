@@ -1,0 +1,144 @@
+name: Build and qualify worker candidate
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact reviewed main commit
+        required: true
+        type: string
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: 'false'
+permissions:
+  contents: read
+concurrency:
+  group: gpu-probe-ci-release
+  cancel-in-progress: false
+jobs:
+  preflight:
+    if: github.repository == 'm0mms/gpu-probe' && github.ref == 'refs/heads/main' && vars.GPU_PROBE_CI_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: check
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 ci/preflight.py
+      - run: python3 -m unittest discover -s ci -p 'test_*.py' -v
+  publish:
+    needs: preflight
+    environment: worker-publication
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 ci/preflight.py
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          driver: docker-container
+          buildkitd-flags: --oci-worker-gc
+          driver-opts: |
+            memory=4g
+            memory-swap=4g
+            cpu-period=100000
+            cpu-quota=200000
+      - name: Record tool versions
+        run: |
+          docker version
+          docker buildx version
+          gh --version
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./image
+          file: ./image/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ needs.preflight.outputs.tag }}
+          provenance: mode=max
+          sbom: true
+      - name: Attest exact returned digest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-name: ghcr.io/m0mms/gpu-probe
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+  qualify:
+    needs: publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    env:
+      EVIDENCE_DIR: qualification-evidence
+      CANDIDATE_DIGEST: ${{ needs.publish.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate source and context again
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 ci/preflight.py
+      - id: pull
+        name: Retrieve runtime image anonymously
+        run: python3 ci/registry_input.py
+      - name: Authenticate for attestation verification only
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+      - name: Verify builder, workflow and source identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: python3 ci/verify_attestation.py
+      - name: Test exact retrieved worker with isolated Docker credentials
+        env:
+          QUALIFY_IMAGE: ${{ steps.pull.outputs.image }}
+          QUALIFICATION_MODE: registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d)
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          python3 ci/qualify.py
+      - name: Bound retained evidence
+        id: evidence
+        if: always()
+        run: python3 ci/check_evidence.py
+      - name: Preserve bounded qualification evidence
+        if: always() && steps.evidence.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: qualification-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30

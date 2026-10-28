@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!context/
+!context/**
+!notices/
+!notices/**
