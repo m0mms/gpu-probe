@@ -1,0 +1,114 @@
+name: Qualify published worker by reviewed receipt
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        required: true
+        type: string
+      publication_run_id:
+        required: true
+        type: string
+      receipt_sha256:
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: gpu-probe-registry-qualification
+  cancel-in-progress: false
+jobs:
+  qualify:
+    if: github.sha == vars.GPU_PROBE_QUALIFY_SHA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+      actions: read
+    env:
+      EVIDENCE_DIR: qualification-evidence
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate source and context again
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 ci/preflight.py
+      - name: Check publication run and artifact bounds before retrieval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECEIPT_MODE: metadata
+          SOURCE_RUN_ID: ${{ inputs.publication_run_id }}
+          EXPECTED_SHA: ${{ github.sha }}
+        run: python3 ci/release_receipt.py
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-receipt-${{ inputs.publication_run_id }}-1
+          run-id: ${{ inputs.publication_run_id }}
+          github-token: ${{ github.token }}
+          path: release-receipt
+      - id: receipt
+        name: Verify reviewed publication receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RECEIPT_MODE: qualify
+          SOURCE_RUN_ID: ${{ inputs.publication_run_id }}
+          EXPECTED_SHA: ${{ github.sha }}
+          RECEIPT_SHA256: ${{ inputs.receipt_sha256 }}
+        run: python3 ci/release_receipt.py
+      - id: pull
+        name: Retrieve runtime image anonymously
+        env:
+          CANDIDATE_DIGEST: ${{ steps.receipt.outputs.digest }}
+        run: python3 ci/registry_input.py
+      - name: Authenticate for attestation verification only
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+      - name: Verify builder, workflow and source identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+          CANDIDATE_DIGEST: ${{ steps.receipt.outputs.digest }}
+        run: python3 ci/verify_attestation.py
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
+        with:
+          version: v0.76.1
+          cache: 'false'
+      - name: Scan exact retrieved runtime image
+        env:
+          PULLED_IMAGE: ${{ steps.pull.outputs.image }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export QUALIFY_IMAGE
+          QUALIFY_IMAGE=$(docker image inspect --format '{{.Id}}' "$PULLED_IMAGE")
+          python3 ci/security_scan.py
+      - name: Test exact retrieved worker with isolated Docker credentials
+        env:
+          QUALIFY_IMAGE: ${{ steps.pull.outputs.image }}
+          QUALIFICATION_MODE: registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG
+          DOCKER_CONFIG=$(mktemp -d)
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          python3 ci/qualify.py
+      - name: Bound retained evidence
+        id: evidence
+        if: always()
+        run: python3 ci/check_evidence.py
+      - name: Preserve bounded qualification evidence
+        if: always() && steps.evidence.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: qualification-evidence/*.json
+          if-no-files-found: warn
+          retention-days: 30
