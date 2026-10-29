@@ -1,7 +1,7 @@
 FROM docker.io/library/debian@sha256:ec31d744f83f4a73447ba045aaab9409997efe5cc706eca4890c1be36cc1606a
 RUN set -eu; \
     rm -f /etc/apt/sources.list /etc/apt/sources.list.d/*; \
-    printf "%s\n" "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://snapshot.debian.org/archive/debian/20261021T000000Z/ bookworm main" "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://snapshot.debian.org/archive/debian-security/20261021T000000Z/ bookworm-security main" > /etc/apt/sources.list; \
+    printf "%s\n" "deb [check-valid-until=no signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://snapshot.debian.org/archive/debian/20261021T000000Z/ bookworm main" "deb [check-valid-until=no signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://snapshot.debian.org/archive/debian-security/20261021T000000Z/ bookworm-security main" > /etc/apt/sources.list; \
     printf "#!/bin/sh\nexit 101\n" > /usr/sbin/policy-rc.d; chmod 0755 /usr/sbin/policy-rc.d; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3=3.11.2-1+b1 openssh-server=1:9.2p1-2+deb12u10 passwd=1:4.13+dfsg1-1+deb12u2; \
