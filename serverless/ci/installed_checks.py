@@ -1,4 +1,5 @@
 """Full installed SDK with transport mocked; CPU-only NVRTC compilation."""
+import importlib.util
 import asyncio,contextlib,ctypes as C,importlib.metadata,io,json,os,sys
 from pathlib import Path
 from unittest.mock import AsyncMock,patch
@@ -8,6 +9,9 @@ def require(value):
     if not value:raise ValueError('installed_check_failed')
 
 def check():
+    require(sys.prefix=='/opt/venv')
+    for name in ('pip','setuptools','wheel','pkg_resources'):
+        require(importlib.util.find_spec(name) is None)
     import runpod
     import runpod.serverless as serverless
     from runpod.serverless.modules import rp_job

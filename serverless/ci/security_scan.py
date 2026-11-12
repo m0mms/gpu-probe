@@ -1,7 +1,7 @@
 """Inherited fail-closed scanner policy, now requiring OS and installed Python coverage."""
 import json,os,re,tempfile
 from datetime import datetime,timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from bounded import run
 from runtime_check import image_ref
 ROOT=Path(__file__).resolve().parent.parent
@@ -12,19 +12,33 @@ def expected_packages():
 def assess(report,image,expected):
     meta=report.get('Metadata',{})
     if meta.get('ImageID')!=image:raise ValueError('scan image binding')
-    if meta.get('OS',{}).get('Family')!='debian' or str(meta.get('OS',{}).get('Name','')).split('.')[0]!='12':raise ValueError('OS coverage')
+    if meta.get('OS',{}).get('Family')!='debian' or str(meta.get('OS',{}).get('Name','')).split('.')[0]!='13':raise ValueError('OS coverage')
     results=report.get('Results')
     if not isinstance(results,list):raise ValueError('scan results')
     osrows=[r for r in results if r.get('Class')=='os-pkgs' and r.get('Type')=='debian']
     pyrows=[r for r in results if r.get('Class')=='lang-pkgs' and r.get('Type')=='python-pkg']
     if len(osrows)!=1 or not osrows[0].get('Packages') or not pyrows:raise ValueError('missing inventory')
     actual={}
+    vendor_count=0
     for row in pyrows:
-        for pkg in row.get('Packages',[]):actual.setdefault(normalized(pkg['Name']),set()).add(pkg['Version'])
+        for pkg in row.get('Packages',[]):
+            raw=pkg.get('FilePath','')
+            path=PurePosixPath(raw)
+            # Inventory matching is location-specific; vulnerability assessment
+            # below still includes every installation, including vendored copies.
+            if len(path.parts)!=7 or path.parts[:5]!=('opt','venv','lib','python3.11','site-packages'):
+                vendor_count+=1
+                continue
+            if str(path)!=raw or path.name!='METADATA' or not path.parts[5].endswith('.dist-info'):
+                raise ValueError('unexpected top-level Python metadata path')
+            name,separator,version=path.parts[5][:-10].rpartition('-')
+            if not separator or normalized(name)!=normalized(pkg['Name']) or version!=pkg['Version']:
+                raise ValueError('Python metadata identity mismatch')
+            actual.setdefault(normalized(pkg['Name']),set()).add(pkg['Version'])
     if not expected or any(actual.get(n)!={v} for n,v in expected.items()):raise ValueError('locked Python coverage')
     findings=sum(len(r.get('Vulnerabilities',[])) for r in results)
     suppressed=sum(len(r.get('ExperimentalModifiedFindings',[])) for r in results)
-    return {'passed':findings==0 and suppressed==0,'findings':findings,'suppressed':suppressed,'locked_python_packages':len(expected),'scope':'OS/Python vulnerability assessment, not complete security clearance'}
+    return {'passed':findings==0 and suppressed==0,'findings':findings,'suppressed':suppressed,'locked_python_packages':len(expected),'other_python_installations':vendor_count,'scope':'OS/Python vulnerability assessment, not complete security clearance'}
 
 def main():
     e=ROOT/'evidence';e.mkdir(exist_ok=True);image=image_ref(os.environ['BUILT_IMAGE_ID'])

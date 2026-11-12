@@ -15,7 +15,7 @@ class GateTests(unittest.TestCase):
  def test_lock_inventory(self):
   p=expected_packages();self.assertEqual(len(p),105);self.assertEqual(p['runpod'],'2.2.1')
  def test_scan_requires_complete_coverage(self):
-  r={'Metadata':{'ImageID':'sha256:x','OS':{'Family':'debian','Name':'12.12'}},'Results':[{'Class':'os-pkgs','Type':'debian','Packages':[{'Name':'libc6','Version':'x'}]},{'Class':'lang-pkgs','Type':'python-pkg','Packages':[{'Name':'Runpod','Version':'2.2.1'}]}]}
+  r={'Metadata':{'ImageID':'sha256:x','OS':{'Family':'debian','Name':'13'}},'Results':[{'Class':'os-pkgs','Type':'debian','Packages':[{'Name':'libc6','Version':'x'}]},{'Class':'lang-pkgs','Type':'python-pkg','Packages':[{'Name':'Runpod','Version':'2.2.1','FilePath':'opt/venv/lib/python3.11/site-packages/runpod-2.2.1.dist-info/METADATA'}]}]}
   self.assertTrue(assess(r,'sha256:x',{'runpod':'2.2.1'})['passed'])
   for bad in [dict(r,Metadata={}),dict(r,Results=r['Results'][:1]),dict(r,Results=[]),dict(r,Results=r['Results'][1:])]:
    with self.assertRaises(ValueError):assess(bad,'sha256:x',{'runpod':'2.2.1'})
