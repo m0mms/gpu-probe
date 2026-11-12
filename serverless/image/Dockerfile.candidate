@@ -1,14 +1,15 @@
-# LOCAL UNBUILT CANDIDATE; publication and GPU execution not authorized.
-FROM docker.io/library/python@sha256:e8c69d86735f6df3efa06b324694fe51f0422785f83a3bd463052636c2421944
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
+# LOCAL UNBUILT CANDIDATE; no publication or GPU authorization.
+FROM docker.io/library/python@sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd AS dependencies
+COPY requirements.lock /requirements.lock
+RUN python -m venv --without-pip /opt/venv && python -m pip --isolated --python /opt/venv install --no-cache-dir --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r /requirements.lock && python -m pip --python /opt/venv check
+FROM docker.io/library/python@sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd
+RUN python -m pip --isolated uninstall -y pip setuptools wheel
+COPY --from=dependencies /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 WORKDIR /qualification
-COPY requirements.lock ./requirements.lock
-RUN python -m pip --isolated install --no-cache-dir --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r requirements.lock
 COPY bootstrap.py handler.py runner.py ./
 COPY package/ ./package/
 ENTRYPOINT ["python", "-B", "/qualification/bootstrap.py"]
 CMD []
-# Deliberately no admission.json, keys, EXPOSE, SSH/Jupyter or startup services.
-# NVRTC path (must verify in Linux): site-packages/nvidia/cuda_nvrtc/lib/libnvrtc.so.12
-# Host driver injected by provider, not included in image. No stub driver allowed.
+# No admission, credentials, exposed ports or persistent storage.
