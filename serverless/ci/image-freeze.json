@@ -1,0 +1,22 @@
+{
+  ".dockerignore": "a31b4b3e65f2f5a76b175c29bd105afd1c0a1600ae13eb9546e42ea3d1b5a878",
+  "Dockerfile.candidate": "720057063ea9dab36e3149e42c6e985d11fbafc611d5563aec036fc9e457d7ec",
+  "bootstrap.py": "8c9cfce585e71fce00156876258b49830639f107bf99263479a78cb98748f529",
+  "check_context.py": "6dde589fa0b5d5332963a309c73cac9235bd0ec28b1321b01819e87f112b709a",
+  "handler.py": "415e0150b47960e1c93155614ef07067c4df513aeaa6b56befebd9207a3dd54d",
+  "package/README.md": "a3526d7daed9b29c14d5928e8a923c1a2ea3cd6caedad03e1758d17bfbdaafe3",
+  "package/freeze.json": "3d17a4dfeea755d4e1c6193d8c9b842161962847a9b771f6ca8b59e7b15bbdd5",
+  "package/host_guard.py": "90c3ebfd7e1819625d2c526a17d3ad90c44d3c20ad1fd6b20b2919c6d02d91b1",
+  "package/inherited-hashes.json": "786c0da5e0df1d67e41a58c9ee29a32d98b5c3ea00b67b76bf6fe7c20da0045f",
+  "package/invalid.cu": "b8ca174dd5f4740c0e4919dfd7897152a3dae9d4dbfb8a63768182be2057862b",
+  "package/native.py": "2def6563e3a52b3f9166a377ebf41f74c6be0b1e7c7b240273111c82a4c7be6a",
+  "package/probe.cu": "53aca7e55493f8e289ccda4df37a58ed80ee95cbe0e7fbd9f7b6798ef2140a00",
+  "package/qualification.py": "40448a9315649330c20474e8605846cf25611729acc3d1a21333dcc8d5740b9c",
+  "package/runtime.py": "faa755d6e0140fa4d0dd6fab723d9f072fbb4b3dc42f125b5581fe50d2991293",
+  "package/test_qualification.py": "70920120e22339cd5e78d93a12881bfeb66449c09dfb4435649a0479c0d1cb5a",
+  "receipt.py": "76227584e4f0735b9241af6a6b96843b0d788c24880928ef7704545b4a71276a",
+  "requirements.lock": "9d76fc9009a5135395341f757a0ea85a1a729fe2020641300497767fb658605d",
+  "runner.py": "c32471e5df98cd7c3eeaf42d988eac85e11365567a582f5da4e83110f45881d4",
+  "test_context.py": "d3d7d76e2b91b8e4434de092755b376c776342118720d8b31bd153cf4a7b634c",
+  "test_handler.py": "7083500efc600138f1f24cfb7bafec46871537922e84b857025250de00f19b7e"
+}
