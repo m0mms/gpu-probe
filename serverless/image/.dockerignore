@@ -1,0 +1,17 @@
+**
+!requirements.lock
+!bootstrap.py
+!handler.py
+!runner.py
+!package/
+package/**
+!package/README.md
+!package/freeze.json
+!package/host_guard.py
+!package/inherited-hashes.json
+!package/invalid.cu
+!package/native.py
+!package/probe.cu
+!package/qualification.py
+!package/runtime.py
+!package/test_qualification.py
