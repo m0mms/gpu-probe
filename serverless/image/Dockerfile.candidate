@@ -3,6 +3,7 @@ FROM docker.io/library/python@sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5f
 COPY requirements.lock /requirements.lock
 RUN python -m venv --without-pip /opt/venv && python -m pip --isolated --python /opt/venv install --no-cache-dir --only-binary=:all: --require-hashes --index-url https://pypi.org/simple -r /requirements.lock && python -m pip --python /opt/venv check
 FROM docker.io/library/python@sha256:b701198cb708b68d9413ca67d6311bd97c9389a2c5fe4da0511fc652642366cd
+RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 && rm -rf /var/lib/apt/lists/*
 RUN python -m pip --isolated uninstall -y pip setuptools wheel
 COPY --from=dependencies /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
