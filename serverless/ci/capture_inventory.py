@@ -37,8 +37,13 @@ def check_zlib(rows):
     found=[r for r in rows if r[0]=='zlib1g:amd64' or r[0]=='zlib1g']
     if len(found)!=1 or found[0][1]!=ZLIB:raise ValueError('zlib version mismatch')
 
+def check_archive_cache(root=Path('/')):
+    if os.path.lexists(root/'var/cache/apt/archives'):
+        raise ValueError('apt archive cache residue')
+
 def collect():
     if sys.platform!='linux' or sys.prefix!='/opt/venv':raise ValueError('capture environment')
+    check_archive_cache()
     result=subprocess.run(['dpkg-query','-W','-f=${binary:Package}\t${Version}\n'],capture_output=True,check=True,timeout=15)
     if len(result.stdout)>1024*1024:raise ValueError('package output cap')
     packages=[line.split('\t') for line in result.stdout.decode().splitlines()];check_zlib(packages)
