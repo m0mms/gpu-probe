@@ -1,4 +1,4 @@
-import json,os,tempfile,unittest
+import glob,json,os,shlex,subprocess,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 import capture_inventory as c
@@ -24,6 +24,42 @@ class CaptureTests(unittest.TestCase):
  def test_capability_value_is_retained(self):
   with patch.object(c.os,'listxattr',create=True,return_value=['security.capability']),patch.object(c.os,'getxattr',create=True,return_value=b'abc'):
    self.assertEqual(c.capabilities(Path('/fixture')),'616263')
+ @patch.object(c,'capabilities',return_value=None)
+ def test_actual_build_cleanup_removes_restricted_cache(self,_cap):
+  # Exercise Dockerfile cleanup operands against a disposable filesystem,
+  # never the host apt directories. Simulated denial is deterministic on macOS.
+  recipe=(Path(__file__).resolve().parent.parent/'image/Dockerfile.candidate').read_text()
+  commands=[line for line in recipe.splitlines() if line.startswith('RUN apt-get update ')]
+  self.assertEqual(len(commands),1)
+  cleanup=shlex.split(commands[0].split(' && ')[-1])
+  self.assertEqual(cleanup[:2],['rm','-rf'])
+  self.assertEqual(cleanup[2:],['/var/lib/apt/lists/*','/var/cache/apt/archives'])
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);partial=root/'var/cache/apt/archives/partial';partial.mkdir(parents=True)
+   (partial/'download.deb').write_text('residue')
+   lists=root/'var/lib/apt/lists';lists.mkdir(parents=True);(lists/'index').write_text('index')
+   keep=root/'var/lib/dpkg/status';keep.parent.mkdir();keep.write_text('keep')
+   original=c.os.scandir
+   def denied(path):
+    if Path(path)==partial:raise PermissionError('regression: restricted apt directory')
+    return original(path)
+   with patch.object(c.os,'scandir',side_effect=denied):
+    with self.assertRaises(PermissionError):c.inventory(root)
+   with self.assertRaises(ValueError):c.check_archive_cache(root)
+   operands=[]
+   for operand in cleanup[2:]:
+    mapped=str(root/operand.lstrip('/'))
+    operands.extend(glob.glob(mapped) if '*' in mapped else [mapped])
+   subprocess.run(cleanup[:2]+operands,check=True,timeout=5)
+   c.check_archive_cache(root)
+   with patch.object(c.os,'scandir',side_effect=denied):rows=c.inventory(root)
+   self.assertFalse(any(x['path'].startswith('/var/cache/apt/archives') for x in rows))
+   self.assertEqual(keep.read_text(),'keep');self.assertFalse((lists/'index').exists())
+ def test_cache_guard_rejects_dangling_symlink(self):
+  with tempfile.TemporaryDirectory() as t:
+   root=Path(t);cache=root/'var/cache/apt';cache.mkdir(parents=True)
+   (cache/'archives').symlink_to('/nonexistent-fixture')
+   with self.assertRaises(ValueError):c.check_archive_cache(root)
  def test_exact_zlib_required(self):
   c.check_zlib([['zlib1g:amd64',c.ZLIB]])
   for rows in [[],[['zlib1g','old']],[['zlib1g',c.ZLIB],['zlib1g:amd64',c.ZLIB]]]:

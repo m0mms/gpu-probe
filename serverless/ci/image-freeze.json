@@ -1,6 +1,6 @@
 {
   ".dockerignore": "a31b4b3e65f2f5a76b175c29bd105afd1c0a1600ae13eb9546e42ea3d1b5a878",
-  "Dockerfile.candidate": "b3bf6fd7c2c4a83c11b56b258386d1f6b645b04bc8f60fbc4538609bd627ada3",
+  "Dockerfile.candidate": "0bb627e275642782c31f432cb26e03ff2fdd7173fa97d2efe6154a040f46a023",
   "bootstrap.py": "8c9cfce585e71fce00156876258b49830639f107bf99263479a78cb98748f529",
   "check_context.py": "6dde589fa0b5d5332963a309c73cac9235bd0ec28b1321b01819e87f112b709a",
   "handler.py": "415e0150b47960e1c93155614ef07067c4df513aeaa6b56befebd9207a3dd54d",
