@@ -66,6 +66,11 @@ jobs:
         env:
           BUILT_IMAGE_ID: ${{ steps.build.outputs.imageid }}
         run: python3 ci/runtime_check.py
+      - name: CPU-only filesystem and library evidence
+        if: always() && steps.build.outcome == 'success'
+        env:
+          BUILT_IMAGE_ID: ${{ steps.build.outputs.imageid }}
+        run: python3 ci/evidence_capture.py
       - id: scanner
         if: always() && steps.build.outcome == 'success'
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
