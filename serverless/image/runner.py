@@ -49,18 +49,31 @@ def establish_limits():
     establish()
 
 
+STAGE = 'runner_setup'
+
+
 def run():
+    global STAGE
+    STAGE = 'package_binding'
     package = bind()
+    STAGE = "attempt_claim"
     claim_attempt()
+    STAGE = "resource_limits"
     establish_limits()
+    STAGE = "module_import"
     sys.dont_write_bytecode = True
     sys.path.insert(0, str(package))
     from attended_guard import AttendedGuard
     from admission import observe
+    STAGE = "guard_creation"
     guard = AttendedGuard()
+    STAGE = "runtime_admission"
     config = observe(guard)
+    STAGE = "module_import"
     import qualification
+    STAGE = "native_qualification"
     result = qualification.qualify(config, guard=guard)
+    STAGE = "result_checks"
     for name in ("native_execution_claim", "numeric_exact", "compile_failure_control", "owned_context_cleanup"):
         if result[name] is not True:
             raise ValueError("test_failed")
@@ -82,15 +95,23 @@ def main():
     with open(os.devnull, "wb") as sink:
         os.dup2(sink.fileno(), 1)
         os.dup2(sink.fileno(), 2)
+    from failure import failed
+    global STAGE
     try:
-        receipt = run()
-        raw = (json.dumps(receipt) + "\n").encode()
+        try:
+            receipt = run()
+            STAGE = 'receipt_encoding'
+            raw = (json.dumps(receipt) + "\n").encode()
+            code = 0
+        except BaseException:
+            raw = (json.dumps(failed(STAGE)) + "\n").encode()
+            code = 1
         while raw:
             written = os.write(output, raw)
             if written <= 0:
                 return 1
             raw = raw[written:]
-        return 0
+        return code
     except BaseException:
         return 1
     finally:
