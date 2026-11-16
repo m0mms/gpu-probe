@@ -9,7 +9,7 @@ COPY --from=dependencies /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=compute,utility
 WORKDIR /qualification
-COPY bootstrap.py handler.py runner.py receipt.py admission.py attended_guard.py ./
+COPY bootstrap.py handler.py runner.py failure.py receipt.py admission.py attended_guard.py ./
 RUN mkdir -m 0700 /qualification/attempt
 COPY package/ ./package/
 ENTRYPOINT ["python", "-B", "/qualification/bootstrap.py"]

@@ -12,7 +12,7 @@ class AdapterTests(unittest.TestCase):
    run.assert_not_called()
  def test_failure_consumes_attempt_without_exception(self):
   with patch.object(h,'execute',side_effect=ValueError('secret')) as run:
-   self.assertEqual(h.handler({'input':h.REQUEST}),{'status':'synthetic_native_fail','reason':'qualification_failed'})
+   self.assertEqual(h.handler({'input':h.REQUEST}),{'status':'synthetic_native_fail','reason':'qualification_failed','stage':'handler_internal'})
    self.assertEqual(h.handler({'input':h.REQUEST}),{'status':'synthetic_native_fail','reason':'attempt_already_used'})
    self.assertEqual(run.call_count,1)
  def test_timeout_and_bad_receipt_fail_closed(self):
@@ -28,7 +28,7 @@ class AdapterTests(unittest.TestCase):
    self.assertEqual(h.handler({'input':h.REQUEST})['reason'],'attempt_already_used')
    self.assertEqual(run.call_count,1)
  def test_real_runner_refuses_unprepared_environment(self):
-  self.assertEqual(h.handler({'input':h.REQUEST}),{'status':'synthetic_native_fail','reason':'qualification_failed'})
+  self.assertEqual(h.handler({'input':h.REQUEST}),{'status':'synthetic_native_fail','reason':'qualification_failed','stage':'attempt_claim'})
  def test_client_requires_bound_exact_success(self):
   good={'id':'job1','status':'COMPLETED','output':PASS.copy()}
   self.assertTrue(accepted(good,'job1'))
