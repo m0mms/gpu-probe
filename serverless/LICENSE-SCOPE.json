@@ -11,7 +11,7 @@
     "serverless/ci/builder.py": "04e98e24ae8150890623be482c6428ba27015612a7426e751f634d74cbbc488f",
     "serverless/ci/capture_inventory.py": "c590a51674530c3117875a837b3a4868b54f9417ee7d14bf3afed8fed8b7a359",
     "serverless/ci/evidence_capture.py": "228b86b8212a25b2acb45cc4e0de49923881627dd2a9f16a7e54ee7574aef4b1",
-    "serverless/ci/installed_checks.py": "a1cd0d832bac082f1b40f6e16e1d86ef86bdcef889aab9d3513a9dd1846ac3ca",
+    "serverless/ci/installed_checks.py": "08e521e489ade7b7c839342d83b11364dd92356627f97272427d3e0fb927deac",
     "serverless/ci/preflight.py": "002840cde8882af0d498c734545f46a3726113922ed85daf77d01cd3eee8b5d6",
     "serverless/ci/publish_attended.py": "323d8c0a2d2e1c6addd3da578b00913948bb34b0808fe3ecf2346da9898ba111",
     "serverless/ci/runtime_check.py": "8daa82c1efe846bc01d7a06450ca756a39b945ac29e5149e59cd40bf76569d3f",
