@@ -2,8 +2,8 @@
   ".dockerignore": "980888b0c3f28c117e2631cfea8dcfaf0d0f4ce4e775b502ffaf5fb62b62168c",
   "Dockerfile.candidate": "77bb240bb2a147678535aa98d74fbcc680c9144f56bbeb0ce9ed9853e9e0b4ce",
   "admission.py": "fc08db0c53d1ba8a6af79b1648a209f5038fc35a8a798e8484ed2abce7fac336",
-  "admission_diagnostics.py": "a7cc8130c0995f4c88d985ef98f421d76c83a6a9a3fca0e430e1c368c2f581e7",
-  "attended_guard.py": "aa344c44750fcd55533f73f2369c8db4fe9d8477c1a5fa84b01460ef585c08a9",
+  "admission_diagnostics.py": "dc919384ab9bcabbd93bc94abd6413325347e297c1c9c354df1b7fcf5089efb7",
+  "attended_guard.py": "eb0873b426a1803e3f595bd55f2fc58ae94aee991b7a8a60deb4a1e9f12db850",
   "bootstrap.py": "8c9cfce585e71fce00156876258b49830639f107bf99263479a78cb98748f529",
   "cgroup_alias.py": "66b0e7ec881b18243f61a15433159c22808dcc461fbf0996d1e993dd03c201e1",
   "check_context.py": "8d766695662686e32aa38ddb271c5acf5b262b30dc67b27665687164234e3f3c",
@@ -27,5 +27,6 @@
   "test_complete_admission.py": "9515642d55b78b59341b96aba425e3afd52cf1d3505658715efc185355039a4b",
   "test_context.py": "d3d7d76e2b91b8e4434de092755b376c776342118720d8b31bd153cf4a7b634c",
   "test_failure_stages.py": "78f42ba9c79a4e070a754059086e2cbbf0dd0f335b8cd8891af5c895cdd49d5d",
-  "test_handler.py": "ff164628b80532ac4adc5e1ee8e2ed56c9a53ee34729e0f0599316a1fb656858"
+  "test_handler.py": "ff164628b80532ac4adc5e1ee8e2ed56c9a53ee34729e0f0599316a1fb656858",
+  "test_layout_diagnostics.py": "3cf1fc53276088330ab1f2671602ff884480161fe32edb9e33d4abf1d9c058f1"
 }
