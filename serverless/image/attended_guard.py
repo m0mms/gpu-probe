@@ -4,6 +4,7 @@ import resource
 import sys
 from pathlib import Path, PurePosixPath
 from admission_diagnostics import mark
+from cgroup_alias import AliasView
 
 GIB = 2**30
 ENV_KEYS = ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS',
@@ -21,9 +22,9 @@ def establish():
         os.environ[key] = '3'
 
 
-def memory_observation(cgroup_text, mount_text, read):
+def memory_observation(cgroup_text, mount_text, read, alias_factory=AliasView):
     """Resolve one visible cgroup2 mount; refuse ambiguity, escapes and bad reads."""
-    mark('cgroup_unified')
+    mark('cgroup_unified', cgroup2_mount_count=0, cgroup_match_count=0, cgroup_identity_count=0)
     paths = [line[3:] for line in cgroup_text.splitlines() if line.startswith('0::')]
     if len(paths) != 1:
         raise RuntimeError('one unified cgroup required')
@@ -32,12 +33,17 @@ def memory_observation(cgroup_text, mount_text, read):
     if not cg.is_absolute() or '..' in cg.parts or '\\' in str(cg):
         raise RuntimeError('invalid cgroup path')
     matches = []
+    records = []
+    mount_count = 0
+    if len(mount_text) > 1024*1024 or len(cgroup_text) > 1024*1024:
+        raise RuntimeError("cgroup input bound")
     for line in mount_text.splitlines():
         left, sep, right = line.partition(' - ')
         fields = left.split()
         if not sep or not right.startswith('cgroup2 ') or len(fields) < 6:
             continue
-        mark('cgroup_mount')
+        mount_count += 1
+        mark('cgroup_mount', cgroup2_mount_count=mount_count)
         root, mount = map(PurePosixPath, fields[3:5])
         # Escaped mount paths are deliberately unsupported, not guessed.
         if any('\\' in str(p) or '..' in p.parts or not p.is_absolute()
@@ -45,35 +51,47 @@ def memory_observation(cgroup_text, mount_text, read):
             raise RuntimeError('unsupported cgroup mount')
         if cg.is_relative_to(root):
             matches.append((mount / cg.relative_to(root), mount))
-    mark('cgroup_mapping')
-    if len(matches) != 1:
-        raise RuntimeError('ambiguous or hidden cgroup mapping')
-    leaf, mount = matches[0]
-    observations = []
-    node = leaf
-    while True:
-        mark('memory_max_read')
-        raw = read(str(node / 'memory.max')).strip()
-        mark('memory_max_parse')
-        maximum = None if raw == 'max' else int(raw)
-        mark('memory_current_read')
-        current_raw = read(str(node / 'memory.current')).strip()
-        mark('memory_current_parse')
-        current = int(current_raw)
-        mark('memory_observation')
-        if current < 0 or (maximum is not None and
-                           (maximum <= 0 or current > maximum)):
-            raise MemoryError('invalid cgroup memory observation')
-        observations.append({'path': str(node), 'limit': maximum, 'current': current})
-        if node == mount:
-            break
-        node = node.parent
+            records.append((fields[0], tuple(int(x) for x in fields[2].split(':'))))
+    mark('cgroup_mapping', cgroup_match_count=len(matches))
+    if not matches or len(matches)>16:
+        raise RuntimeError('missing or excessive cgroup mappings')
+    if len(matches) == 1:
+        observations = read_views(matches, read)
+    else:
+        with alias_factory(matches, records, cgroup_text, mount_text) as view:
+            observations = read_views(matches, view.file)
+            mark('cgroup_mapping')
+            view.verify()
     finite = [o['limit'] for o in observations if o['limit'] is not None]
     mark('memory_ceiling', **({'effective_limit': min(finite)} if finite else {}))
     if not finite or min(finite) > 64 * GIB:
         raise MemoryError('finite visible effective ceiling <=64GiB required')
     return {'effective_limit': min(finite), 'visible_ancestors': observations,
             'hidden_ancestors_verified': False}
+
+
+def read_views(matches, reader):
+    observations = []
+    for leaf, mount in matches:
+        node = leaf
+        while True:
+            mark('memory_max_read')
+            raw = reader(str(node / 'memory.max')).strip()
+            mark('memory_max_parse')
+            maximum = None if raw == 'max' else int(raw)
+            mark('memory_current_read')
+            current_raw = reader(str(node / 'memory.current')).strip()
+            mark('memory_current_parse')
+            current = int(current_raw)
+            mark('memory_observation')
+            if current < 0 or (maximum is not None and
+                               (maximum <= 0 or current > maximum)):
+                raise MemoryError('invalid cgroup memory observation')
+            observations.append({'path': str(node), 'limit': maximum, 'current': current})
+            if node == mount:
+                break
+            node = node.parent
+    return observations
 
 
 def validate_process(rss, threads, limits, environment):
