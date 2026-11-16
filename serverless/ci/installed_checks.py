@@ -29,7 +29,7 @@ def check():
     receipts=[]
     for fail in [False,True]:
         handler.USED=False
-        receipt={'status':'synthetic_native_pass','elements':257,'numeric_exact':True,'negative_compile_control':True,'owned_context_cleanup':True,'provider_cleanup_verified':False,'scientific_operator_qualified':False}
+        receipt={'status':'synthetic_native_pass','elements':257,'numeric_exact':True,'negative_compile_control':True,'owned_context_cleanup':True,'provider_cleanup_verified':False,'scientific_operator_qualified':False} # SDK transport mock; native receipt tested separately
         with patch.object(handler,'execute',side_effect=RuntimeError('synthetic-private-detail') if fail else None,return_value=receipt),patch.object(rp_job,'send_result',new_callable=AsyncMock) as send:
             out=asyncio.run(rp_job.handle_job(None,cfg,{'id':'offline-check','input':handler.REQUEST}))
             send.assert_awaited_once()
