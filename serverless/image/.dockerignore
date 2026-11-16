@@ -3,6 +3,7 @@
 !bootstrap.py
 !handler.py
 !runner.py
+!admission_diagnostics.py
 !failure.py
 !receipt.py
 !admission.py

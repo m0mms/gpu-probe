@@ -96,6 +96,7 @@ def main():
         os.dup2(sink.fileno(), 1)
         os.dup2(sink.fileno(), 2)
     from failure import failed
+    from admission_diagnostics import snapshot
     global STAGE
     try:
         try:
@@ -104,7 +105,10 @@ def main():
             raw = (json.dumps(receipt) + "\n").encode()
             code = 0
         except BaseException:
-            raw = (json.dumps(failed(STAGE)) + "\n").encode()
+            failure = failed(STAGE)
+            if STAGE == 'runtime_admission':
+                failure['admission'] = snapshot()
+            raw = (json.dumps(failure) + "\n").encode()
             code = 1
         while raw:
             written = os.write(output, raw)

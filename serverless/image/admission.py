@@ -7,6 +7,7 @@ import ctypes as C
 import hashlib
 from pathlib import Path
 import sysconfig
+from admission_diagnostics import mark, reset
 
 DRIVERS = ('/usr/lib/x86_64-linux-gnu/libcuda.so.1',
            '/lib/x86_64-linux-gnu/libcuda.so.1',
@@ -25,41 +26,60 @@ def bound_file(path):
 
 
 def driver_path(paths=DRIVERS):
-    resolved = {Path(p).resolve(strict=True) for p in paths if Path(p).exists()}
+    mark('driver_discovery')
+    present = [Path(p).exists() for p in paths]
+    mark('driver_discovery', driver_path_mask=sum(1 << i for i, v in enumerate(present) if v))
+    resolved = {Path(p).resolve(strict=True) for p, exists in zip(paths, present) if exists}
+    mark('driver_discovery', driver_resolved_count=len(resolved))
     if len(resolved) != 1:
         raise ValueError('one_driver_required')
     return resolved.pop()
 
 
 def observe(guard):
+    reset()
+    mark('guard_before')
     guard()  # Before loading even the discovery libraries.
-    driver = bound_file(driver_path())
+    path = driver_path()
+    mark('driver_binding')
+    driver = bound_file(path)
+    mark('nvrtc_binding')
     nvrtc = bound_file(Path(sysconfig.get_paths()['purelib']) /
                        'nvidia/cuda_nvrtc/lib/libnvrtc.so.12')
-    cu, nv = C.CDLL(driver['path']), C.CDLL(nvrtc['path'])
+    mark('driver_load')
+    cu = C.CDLL(driver['path'])
+    mark('nvrtc_load')
+    nv = C.CDLL(nvrtc['path'])
     IP = C.POINTER(C.c_int)
 
-    def call(lib, name, types, *args):
+    def call(code, lib, name, types, *args):
+        mark(code)
         f = getattr(lib, name)
         f.argtypes, f.restype = types, C.c_int
-        if f(*args) != 0:
+        result = f(*args)
+        mark(code, native_return=result)
+        if result != 0:
             raise ValueError('native_observation_failed')
 
-    call(cu, 'cuInit', [C.c_uint], 0)
+    call('cu_init', cu, 'cuInit', [C.c_uint], 0)
     count, device, version, major, minor, vm, vn = (C.c_int() for _ in range(7))
-    call(cu, 'cuDeviceGetCount', [IP], C.byref(count))
+    call('device_count', cu, 'cuDeviceGetCount', [IP], C.byref(count))
+    mark('one_device', device_count=count.value)
     if count.value != 1:
         raise ValueError('one_visible_device_required')
-    call(cu, 'cuDeviceGet', [IP, C.c_int], C.byref(device), 0)
-    call(cu, 'cuDriverGetVersion', [IP], C.byref(version))
+    call('device_select', cu, 'cuDeviceGet', [IP, C.c_int], C.byref(device), 0)
+    call('driver_version', cu, 'cuDriverGetVersion', [IP], C.byref(version))
     for attribute, target in ((75, major), (76, minor)):
-        call(cu, 'cuDeviceGetAttribute', [IP, C.c_int, C.c_int],
+        call('compute_major' if attribute == 75 else 'compute_minor', cu, 'cuDeviceGetAttribute', [IP, C.c_int, C.c_int],
              C.byref(target), attribute, device)
-    call(nv, 'nvrtcVersion', [IP, IP], C.byref(vm), C.byref(vn))
+    call('nvrtc_version', nv, 'nvrtcVersion', [IP, IP], C.byref(vm), C.byref(vn))
     # Locked NVRTC 12.9; select only a device covered by the CPU compile check.
+    mark('runtime_compatibility', driver_version=version.value, nvrtc_major=vm.value, nvrtc_minor=vn.value, compute_major=major.value, compute_minor=minor.value)
     if version.value < 12090 or [vm.value, vn.value] != [12, 9] or [major.value, minor.value] != [8, 9]:
         raise ValueError('unsupported_runtime')
+    mark('guard_after')
     guard()
+    mark('admission_complete')
     return dict(driver=driver, nvrtc=nvrtc, device=0,
                 compute=[major.value, minor.value], driver_version=version.value,
                 nvrtc_version=[vm.value, vn.value])

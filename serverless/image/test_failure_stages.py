@@ -68,7 +68,7 @@ raise SystemExit(runner.main())
         result = subprocess.run([sys.executable,'-B','-c',code],
             cwd=Path(__file__).parent,capture_output=True,timeout=10)
         self.assertEqual(result.returncode,1)
-        self.assertEqual(json.loads(result.stdout),failed('runtime_admission'))
+        self.assertEqual(json.loads(result.stdout),dict(failed('runtime_admission'), admission={'code':'admission_start','facts':{}}))
         self.assertEqual(result.stderr,b'')
         self.assertNotIn(b'SECRET',result.stdout)
 
@@ -93,7 +93,7 @@ raise SystemExit(runner.main())
                 self.assertEqual(handler.execute(),failed(stage))
 
     def test_docker_includes_failure_module(self):
-        self.assertIn('runner.py failure.py receipt.py', (Path(__file__).parent/'Dockerfile.candidate').read_text())
+        self.assertIn('runner.py admission_diagnostics.py failure.py receipt.py', (Path(__file__).parent/'Dockerfile.candidate').read_text())
 
 
 if __name__ == '__main__': unittest.main()
