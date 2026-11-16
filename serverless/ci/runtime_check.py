@@ -25,7 +25,7 @@ def main():
         args=['docker','run','--name',name,'--network','none','--read-only','--tmpfs','/tmp:rw,nosuid,nodev,size=256m','--memory','2g','--memory-swap','2g','--cpus','2','--pids-limit','256','--cap-drop','ALL','--security-opt','no-new-privileges','--mount','type=bind,src='+str(ROOT/'ci')+',dst=/checks,readonly','--entrypoint','python',image,'-B','/checks/installed_checks.py']
         code,out,err=run(args,timeout=180,cap=1024*1024)
         (E/'runtime.json').write_text(json.dumps({'exit_code':code,'stdout':out.decode(errors='replace'),'stderr':err.decode(errors='replace')})+'\n')
-        expected={'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
+        expected={'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
         if code or json.loads(out)!=expected:raise ValueError('installed checks failed')
     finally:
         run(['docker','rm','-f',name],timeout=30)

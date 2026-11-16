@@ -8,6 +8,7 @@
 !receipt.py
 !admission.py
 !attended_guard.py
+!cgroup_alias.py
 !package/
 package/**
 !package/README.md
