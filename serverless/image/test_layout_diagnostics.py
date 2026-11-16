@@ -45,10 +45,12 @@ class LayoutTests(unittest.TestCase):
   self.assertEqual(d.snapshot()['facts']['mount_v1_memory_records'],0)
   for value in [True,'1',2**63]:
    self.assertFalse(d.valid({'code':'cgroup_mapping','facts':{'mount_v2_records':value}}))
- def test_admission_ast_unchanged_except_diagnostic_call(self):
-  expected={'establish': '5a26d25f49d9eab80d6f14cee22149792da4ebb21ce3304175d3309b4bad0776', 'memory_observation': '48e07cee7199cd6b8dd89227a0430f754f328489b84ffc058a00cc778a4b999e', 'read_views': '0f3b355284eedfee849812dcce342dc2f266f7e7999481e8c0a2545b45043e63', 'validate_process': 'a78768e0b5b53d2b182e2a48825aa660e82b14f724cd88ca4d7c1a75d9e00f08', 'AttendedGuard': '14a105a794cf449a07d00f9bb69414fbdb999f360e43c8f520b7088dd194d572'}
-  new=ast.parse(Path(g.__file__).read_text())
-  newnodes={n.name:n for n in new.body if isinstance(n,(ast.FunctionDef,ast.ClassDef))}
-  node=copy.deepcopy(newnodes['memory_observation']);node.body=[n for n in node.body if not (isinstance(n,ast.Expr) and isinstance(n.value,ast.Call) and any(isinstance(k.value,ast.Call) and isinstance(k.value.func,ast.Name) and k.value.func.id=='layout_counts' for k in n.value.keywords))]
-  newnodes['memory_observation']=node
-  for name,digest in expected.items():self.assertEqual(hashlib.sha256(ast.dump(newnodes[name]).encode()).hexdigest(),digest,name)
+ def test_admission_source_unchanged_except_diagnostic_call(self):
+  expected={'establish': '106c43fd3bb7333ac03e05f47ba46610a3c2c7f9c10e9fe7889c9364d3efd638', 'memory_observation': '5e54ab38069912f3fed0bed39af1143a6e10f1b1ccd783b351f358bad5f0a9eb', 'read_views': '8910ce874e2bea68c5195ac623df0b15200e7a204669f123cf058deacb519d56', 'validate_process': 'd874628306be3d185ec0433c86267561a71664580b9c2c521563c010c49f4dca', 'AttendedGuard': '209d32f64ac8783e3c60a89810815964414bff9e98924fe065d5a0e9966b98a0'}
+  source=Path(g.__file__).read_text()
+  diagnostic="    mark('cgroup_unified', **layout_counts(cgroup_text, mount_text))\n"
+  self.assertEqual(source.count(diagnostic),1)
+  source=source.replace(diagnostic,'')
+  nodes={n.name:n for n in ast.parse(source).body if isinstance(n,(ast.FunctionDef,ast.ClassDef))}
+  for name,digest in expected.items():
+   self.assertEqual(hashlib.sha256(ast.get_source_segment(source,nodes[name]).encode()).hexdigest(),digest,name)
