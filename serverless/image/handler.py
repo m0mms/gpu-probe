@@ -21,15 +21,11 @@ def execute():
     if result.returncode != 0 or len(result.stdout) > 16384:
         raise RuntimeError("qualification_failed")
     receipt = json.loads(result.stdout)
-    expected = {"status": "synthetic_native_pass", "elements": 257,
-                "numeric_exact": True, "negative_compile_control": True,
-                "owned_context_cleanup": True,
-                "provider_cleanup_verified": False,
-                "scientific_operator_qualified": False}
-    if (receipt != expected or not isinstance(receipt, dict)
-            or any(type(receipt[key]) is not type(value) for key, value in expected.items())):
+    from receipt import valid_output
+    if not valid_output(receipt):
         raise RuntimeError("qualification_failed")
-    return expected  # Reconstruct output; no arbitrary strings or extra fields.
+    return receipt  # Exact schema, bounded numeric/hash fields; no raw logs.
+
 
 
 def handler(job):

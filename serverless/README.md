@@ -1,13 +1,16 @@
-# Serverless synthetic validation candidate
+# Serverless synthetic qualification
 
-This is an unbuilt candidate for one no-push Linux/amd64 CI validation. No successful installed-SDK, compiler or GPU result is claimed by the source package.
+Two manual workflows have different authority and outcomes:
 
-The manual workflow builds locally, tests installed Runpod SDK behaviour with transport mocked, loads NVRTC and compiles positive/negative synthetic kernels without a GPU, scans OS and Python packages, and retains JSON evidence. It does not publish an image or create provider resources. It requires a reviewed exact commit SHA and separate execution approval.
+- `serverless-validation.yml` retains the general zero-findings gate and never publishes images.
+- `attended-synthetic.yml` is the dated one-campaign exception: one Linux/amd64 CPU build, installed SDK/compiler checks, full scan, then publication to `ghcr.io/m0mms/gpu-probe` under a source-specific tag. It requires the exact reviewed commit activation, refuses reruns and expires before 2026-11-23. It accepts unresolved OS LOW/MEDIUM/HIGH/UNKNOWN findings only for this synthetic image publication; CRITICAL, Python or suppressed findings refuse. This is not a reusable security clearance or permission to create GPU resources.
 
-Returned `synthetic_native_fail` is a test failure even if provider delivery is `COMPLETED`. A consumer must use the saved job ID and the exact typed success receipt (`image/receipt.py`). SDK failures outside the handler may include diagnostics; this is not universal log containment.
+Both retain raw scan/inventory evidence. General scan failure remains recorded; it is not relabeled as a clean image. Fresh evidence and independent review are still required before the separate attended GPU attempt.
 
-The worker image contains no admission file or credentials. Resource admission, driver compatibility, provider retries, actual GPU execution and external cleanup remain separate gates. Dependencies are pinned, not declared vulnerability-free; any reported finding blocks this validation's security gate pending review.
+The worker accepts only the fixed synthetic request. It binds the unchanged package, claims one filesystem-local attempt marker, observes and hashes the installed NVRTC/provider driver, and checks device 0 (one visible GPU, compute 8.9), NVRTC 12.9 and driver >=12.9 before calling the frozen test. These hashes establish observed identity, not trusted provenance. The wrapper guard permits a finite visible cgroup ceiling <=64GiB, sampled RSS <=6GiB, address space <=48GiB and 3 threads. It does not claim hidden-ancestor verification or hard RSS containment. No user credentials or research inputs are included.
 
-The workflow runs for at most 30 minutes. Build and test container limits do not impose a hard quota on the Docker daemon or disk. Timeout or cancellation can interrupt final evidence collection. Repository publication and Actions use require the owner's applicable authority.
+Returned `synthetic_native_fail` is failure even when the provider reports `COMPLETED`. Consumers must bind the saved job ID and validate the typed receipt and bounded evidence using `image/receipt.py`. Provider-injected credentials, SDK pre-handler processing and worker replacement/replay remain residual risks. The local marker is not global exactly-once protection.
 
-Custom source is licensed under MIT, as scoped in LICENSE-SCOPE.json. Referenced dependencies and container components retain their own licenses. No third-party library binaries or SDK source snapshot are distributed here.
+Neither workflow creates provider resources. EU placement, live price, exact endpoint configuration, attendance and external cleanup are separate prerequisites. Public source and image publication require the owner's applicable authority. CI timeout/cancellation can interrupt evidence capture; container limits are not a hard daemon/disk quota.
+
+Custom source is MIT under LICENSE-SCOPE.json. Referenced dependencies retain their licenses. No third-party binaries or SDK snapshot are included in this source; the built image contains the locked dependencies.

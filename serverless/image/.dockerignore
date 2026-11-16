@@ -3,6 +3,9 @@
 !bootstrap.py
 !handler.py
 !runner.py
+!receipt.py
+!admission.py
+!attended_guard.py
 !package/
 package/**
 !package/README.md
