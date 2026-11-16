@@ -33,7 +33,7 @@ def check():
         with patch.object(handler,'execute',side_effect=RuntimeError('synthetic-private-detail') if fail else None,return_value=receipt),patch.object(rp_job,'send_result',new_callable=AsyncMock) as send:
             out=asyncio.run(rp_job.handle_job(None,cfg,{'id':'offline-check','input':handler.REQUEST}))
             send.assert_awaited_once()
-        require(out=={'output':({'status':'synthetic_native_fail','reason':'qualification_failed'} if fail else receipt)})
+        require(out=={'output':({'status':'synthetic_native_fail','reason':'qualification_failed','stage':'handler_internal'} if fail else receipt)})
         receipts.append(True)
     import sysconfig
     nvpath=Path(sysconfig.get_paths()['purelib'])/'nvidia/cuda_nvrtc/lib/libnvrtc.so.12'
