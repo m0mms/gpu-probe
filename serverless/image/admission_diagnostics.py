@@ -7,7 +7,7 @@ limits_read process_rss process_as process_threads process_environment
 driver_discovery driver_binding nvrtc_binding driver_load nvrtc_load
 cu_init device_count device_select driver_version compute_major compute_minor
 nvrtc_version one_device runtime_compatibility admission_complete'''.split())
-FACTS = frozenset('''cgroup2_mount_count cgroup_match_count cgroup_identity_count effective_limit rss threads as_soft as_hard
+FACTS = frozenset('''cgroup_layout_oversize cgroup_v1_memory_memberships cgroup_unified_memberships cgroup_membership_malformed mount_records mount_malformed mount_v1_memory_records mount_v2_records mount_cgroup2_tokens cgroup2_mount_count cgroup_match_count cgroup_identity_count effective_limit rss threads as_soft as_hard
 driver_path_mask driver_resolved_count native_return device_count
 driver_version nvrtc_major nvrtc_minor compute_major compute_minor'''.split())
 _code = 'admission_start'

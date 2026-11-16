@@ -55,7 +55,7 @@ def check():
         finally:require(nv.nvrtcDestroyProgram(C.byref(program))==0)
     from cgroup_linux_check import check as cgroup_check
     require(cgroup_check())
-    return {'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
+    return {'cgroup_layout_checks':True,'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
 if __name__=='__main__':
     fd=os.dup(1)
     with open(os.devnull,'wb') as sink:os.dup2(sink.fileno(),1);os.dup2(sink.fileno(),2)
