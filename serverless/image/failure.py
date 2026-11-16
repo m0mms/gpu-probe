@@ -16,7 +16,15 @@ def failed(stage):
 
 
 def valid_failure(value):
-    return (type(value) is dict and set(value) == {'status', 'reason', 'stage'}
-            and value.get('status') == 'synthetic_native_fail'
+    from admission_diagnostics import valid
+    if type(value) is not dict:
+        return False
+    keys = set(value)
+    if keys not in ({'status', 'reason', 'stage'}, {'status', 'reason', 'stage', 'admission'}):
+        return False
+    if not (value.get('status') == 'synthetic_native_fail'
             and value.get('reason') == 'qualification_failed'
-            and type(value.get('stage')) is str and value['stage'] in STAGES)
+            and type(value.get('stage')) is str and value['stage'] in STAGES):
+        return False
+    return ('admission' not in value or
+            (value['stage'] == 'runtime_admission' and valid(value['admission'])))
