@@ -53,9 +53,15 @@ def check():
                 require(code==0);size=S();require(nv.nvrtcGetPTXSize(program,C.byref(size))==0);require(0<size.value<1048576)
                 ptx=C.create_string_buffer(size.value);require(nv.nvrtcGetPTX(program,ptx)==0);require(b'.entry base' in ptx.value or b'.entry	base' in ptx.value)
         finally:require(nv.nvrtcDestroyProgram(C.byref(program))==0)
+    import unittest
+    import installed_native_tests
+    from test_qualification import QualificationTests
+    suite=unittest.TestSuite([unittest.defaultTestLoader.loadTestsFromModule(installed_native_tests),unittest.defaultTestLoader.loadTestsFromTestCase(QualificationTests)])
+    result=unittest.TextTestRunner(stream=io.StringIO()).run(suite)
+    require(result.testsRun==22 and result.wasSuccessful())
     from cgroup_linux_check import check as cgroup_check
     require(cgroup_check())
-    return {'cgroup_layout_checks':True,'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
+    return {'native_diagnostics_checks':True,'native_diagnostics_test_count':22,'cgroup_layout_checks':True,'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
 if __name__=='__main__':
     fd=os.dup(1)
     with open(os.devnull,'wb') as sink:os.dup2(sink.fileno(),1);os.dup2(sink.fileno(),2)

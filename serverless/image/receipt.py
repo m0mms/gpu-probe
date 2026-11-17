@@ -17,7 +17,7 @@ def valid_output(out):
             'peak_sampled_rss', 'effective_memory_limit', 'hidden_ancestors_verified',
             'provider_admission_verified'}:
         return False
-    if e['package_freeze'] != '3d17a4dfeea755d4e1c6193d8c9b842161962847a9b771f6ca8b59e7b15bbdd5':
+    if e['package_freeze'] != '2f5f212e97f3858c250ea383370b2fb95604c248d7beb388b1b06825c42af288':
         return False
     if e['hidden_ancestors_verified'] is not False or e['provider_admission_verified'] is not False:
         return False

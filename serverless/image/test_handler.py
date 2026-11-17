@@ -2,7 +2,7 @@ import json, subprocess, unittest
 from unittest.mock import patch
 import handler as h
 from receipt import PASS as BASE, accepted
-PASS = dict(BASE, evidence={"package_freeze":"3d17a4dfeea755d4e1c6193d8c9b842161962847a9b771f6ca8b59e7b15bbdd5", "native_identity":dict(driver_sha256="a"*64,nvrtc_sha256="b"*64,ptx_sha256="c"*64,compile_log_sha256="d"*64,device_ordinal=0,compute=[8,9],driver_version=12090,nvrtc_version=[12,9]), "peak_sampled_rss":1024,"effective_memory_limit":8*2**30,"hidden_ancestors_verified":False,"provider_admission_verified":False})
+PASS = dict(BASE, evidence={"package_freeze":"2f5f212e97f3858c250ea383370b2fb95604c248d7beb388b1b06825c42af288", "native_identity":dict(driver_sha256="a"*64,nvrtc_sha256="b"*64,ptx_sha256="c"*64,compile_log_sha256="d"*64,device_ordinal=0,compute=[8,9],driver_version=12090,nvrtc_version=[12,9]), "peak_sampled_rss":1024,"effective_memory_limit":8*2**30,"hidden_ancestors_verified":False,"provider_admission_verified":False})
 class AdapterTests(unittest.TestCase):
  def setUp(self):h.USED=False
  def test_invalid_input_never_executes(self):

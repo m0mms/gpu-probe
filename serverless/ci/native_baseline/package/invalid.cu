@@ -1,0 +1,1 @@
+#error intentional_native_qualification_compile_failure

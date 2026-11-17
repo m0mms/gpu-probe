@@ -15,7 +15,7 @@ def check():
         f=p/n
         require(f.is_file() and not f.is_symlink())
         if n in m:require(hashlib.sha256(f.read_bytes()).hexdigest()==m[n])
-    files=['requirements.lock','bootstrap.py','handler.py','runner.py','admission_diagnostics.py','failure.py','receipt.py','admission.py','attended_guard.py','cgroup_alias.py']
+    files=['requirements.lock','bootstrap.py','handler.py','runner.py','admission_diagnostics.py','failure.py','receipt.py','admission.py','attended_guard.py','cgroup_alias.py','native_diagnostics.py','native_operations.py']
     for n in files:require((ROOT/n).is_file() and not (ROOT/n).is_symlink())
     expected=['**']+['!'+x for x in files]+['!package/','package/**']+['!package/'+n for n in sorted(names)]
     require((ROOT/'.dockerignore').read_text().splitlines()==expected)
