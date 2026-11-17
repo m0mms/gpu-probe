@@ -8,7 +8,7 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-FREEZE = "3d17a4dfeea755d4e1c6193d8c9b842161962847a9b771f6ca8b59e7b15bbdd5"
+FREEZE = "2f5f212e97f3858c250ea383370b2fb95604c248d7beb388b1b06825c42af288"
 
 
 def bind():
@@ -71,6 +71,8 @@ def run():
     config = observe(guard)
     STAGE = "module_import"
     import qualification
+    import native_diagnostics
+    native_diagnostics.reset()
     STAGE = "native_qualification"
     result = qualification.qualify(config, guard=guard)
     STAGE = "result_checks"
@@ -108,6 +110,9 @@ def main():
             failure = failed(STAGE)
             if STAGE == 'runtime_admission':
                 failure['admission'] = snapshot()
+            if STAGE == 'native_qualification':
+                from native_diagnostics import snapshot as native_snapshot
+                failure['native'] = native_snapshot()
             raw = (json.dumps(failure) + "\n").encode()
             code = 1
         while raw:

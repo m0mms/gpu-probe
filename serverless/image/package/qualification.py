@@ -1,3 +1,4 @@
+import native_diagnostics as _nd
 """Tiny synthetic CUDA qualification callable; no provisioning or launch CLI.
 
 A separately approved supervisor must establish provider/estate admission first.
@@ -19,20 +20,20 @@ MARKER = 'intentional_native_qualification_compile_failure'
 
 
 def digest(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    return _nd.invoke('qualification.digest.hexdigest.1', lambda: (_nd.invoke('qualification.digest.sha256.1', lambda: (hashlib.sha256(_nd.invoke('qualification.digest.read_bytes.1', lambda: (_nd.invoke('qualification.digest.Path.1', lambda: (Path(path))).read_bytes()))))).hexdigest()))
 
 
 def verify_package():
     # Integrity check, not an authorization/signature check. Supervisor pins freeze.
-    manifest = json.loads((HERE / 'freeze.json').read_text())
-    for name, expected in manifest.items():
-        require(Path(name).name == name, 'flat package manifest required')
-        require(digest(HERE / name) == expected, 'package hash mismatch')
+    manifest = _nd.invoke('qualification.verify_package.loads.1', lambda: (json.loads(_nd.invoke('qualification.verify_package.read_text.1', lambda: ((HERE / 'freeze.json').read_text())))))
+    for name, expected in _nd.invoke('qualification.verify_package.items.1', lambda: (manifest.items())):
+        _nd.invoke('qualification.verify_package.require.1', lambda: (require(_nd.invoke('qualification.verify_package.Path.1', lambda: (Path(name))).name == name, 'flat package manifest required')))
+        _nd.invoke('qualification.verify_package.require.2', lambda: (require(_nd.invoke('qualification.verify_package.digest.1', lambda: (digest(HERE / name))) == expected, 'package hash mismatch')))
 
 
 def clean(backend):
-    require(backend.ctx is None and backend.mod is None and not backend.alloc
-            and not backend.cleanup_errors, 'native cleanup unresolved')
+    _nd.invoke('qualification.clean.require.1', lambda: (require(backend.ctx is None and backend.mod is None and not backend.alloc
+            and not backend.cleanup_errors, 'native cleanup unresolved')))
 
 
 def qualify(config, *, native_type=Native, guard=None):
@@ -41,44 +42,45 @@ def qualify(config, *, native_type=Native, guard=None):
     config has the existing Native configuration fields except kernel, which is
     always selected from this frozen package. No input arrays or source accepted.
     """
-    verify_package()
-    require(set(config) == {'driver', 'nvrtc', 'device', 'compute',
-                            'driver_version', 'nvrtc_version'}, 'config fields')
-    guard = HostGuard() if guard is None else guard
-    guard()  # Fail before CUDA library loading on an inadmissible host.
+    _nd.invoke('qualification.qualify.verify_package.1', lambda: (verify_package()))
+    _nd.invoke('qualification.qualify.require.1', lambda: (require(_nd.invoke('qualification.qualify.set.1', lambda: (set(config))) == {'driver', 'nvrtc', 'device', 'compute',
+                            'driver_version', 'nvrtc_version'}, 'config fields')))
+    guard = _nd.invoke('qualification.qualify.HostGuard.1', lambda: (HostGuard())) if guard is None else guard
+    _nd.invoke('qualification.qualify.guard.1', lambda: (guard()))  # Fail before CUDA library loading on an inadmissible host.
 
     def bound(name):
-        return dict(config, kernel={'path': str(HERE / name),
-                                    'sha256': digest(HERE / name)})
+        return _nd.invoke('qualification.qualify.bound.dict.1', lambda: (dict(config, kernel={'path': _nd.invoke('qualification.qualify.bound.str.1', lambda: (str(HERE / name))),
+                                    'sha256': _nd.invoke('qualification.qualify.bound.digest.1', lambda: (digest(HERE / name)))})))
 
-    backend = native_type(bound('probe.cu'), guard)
-    with Runtime(backend, guard) as runtime:
-        values = np.arange(-128, 129, dtype=np.float64)
-        input_pointer = runtime.upload(values)
+    backend = _nd.invoke('qualification.qualify.native_type.1', lambda: (native_type(_nd.invoke('qualification.qualify.bound.1', lambda: (bound('probe.cu'))), guard)))
+    with _nd.invoke('qualification.qualify.Runtime.1', lambda: (Runtime(backend, guard))) as runtime:
+        values = _nd.invoke('qualification.qualify.arange.1', lambda: (np.arange(-128, 129, dtype=np.float64)))
+        input_pointer = _nd.invoke('qualification.qualify.upload.1', lambda: (runtime.upload(values)))
         # NaNs detect missing writes, including the partial final block.
-        output_pointer = runtime.upload(np.full(257, np.nan, dtype=np.float64))
-        runtime.run('base', 3, [input_pointer, output_pointer, C.c_int(257)])
-        result = runtime.get(output_pointer, 257)
-        require(np.array_equal(result, 2 * values + 1), 'numeric comparison failed')
-        runtime.release(0)
-        require(not runtime.alloc and not backend.alloc, 'allocation release failed')
+        output_pointer = _nd.invoke('qualification.qualify.upload.2', lambda: (runtime.upload(_nd.invoke('qualification.qualify.full.1', lambda: (np.full(257, np.nan, dtype=np.float64))))))
+        _nd.invoke('qualification.qualify.run.1', lambda: (runtime.run('base', 3, [input_pointer, output_pointer, _nd.invoke('qualification.qualify.c_int.1', lambda: (C.c_int(257)))])))
+        result = _nd.invoke('qualification.qualify.get.1', lambda: (runtime.get(output_pointer, 257)))
+        _nd.invoke('qualification.qualify.require.2', lambda: (require(_nd.invoke('qualification.qualify.array_equal.1', lambda: (np.array_equal(result, 2 * values + 1))), 'numeric comparison failed')))
+        _nd.invoke('qualification.qualify.release.1', lambda: (runtime.release(0)))
+        _nd.invoke('qualification.qualify.require.3', lambda: (require(not runtime.alloc and not backend.alloc, 'allocation release failed')))
         peak = runtime.peak
         peak_device = runtime.peak_device
-    clean(backend)
+    _nd.invoke('qualification.qualify.clean.1', lambda: (clean(backend)))
 
     # Retain the object to inspect constructor-failure cleanup, not just its error.
-    failed = native_type.__new__(native_type)
+    _nd.negative_phase()
+    failed = _nd.invoke('qualification.qualify.__new__.1', lambda: (native_type.__new__(native_type)))
     try:
-        native_type.__init__(failed, bound('invalid.cu'), guard)
+        _nd.invoke('qualification.qualify.__init__.1', lambda: (native_type.__init__(failed, _nd.invoke('qualification.qualify.bound.2', lambda: (bound('invalid.cu'))), guard)))
     except RuntimeError as error:
-        require(str(error).startswith('NVRTC compile failed:') and MARKER in str(error),
-                'unexpected negative-control failure')
-        require(not getattr(error, '__notes__', []), 'negative-control cleanup note')
-        clean(failed)
+        _nd.invoke('qualification.qualify.require.4', lambda: (require(_nd.invoke('qualification.qualify.startswith.1', lambda: (_nd.invoke('qualification.qualify.str.1', lambda: (str(error))).startswith('NVRTC compile failed:'))) and MARKER in _nd.invoke('qualification.qualify.str.2', lambda: (str(error))),
+                'unexpected negative-control failure')))
+        _nd.invoke('qualification.qualify.require.5', lambda: (require(not _nd.invoke('qualification.qualify.getattr.1', lambda: (getattr(error, '__notes__', []))), 'negative-control cleanup note')))
+        _nd.invoke('qualification.qualify.clean.2', lambda: (clean(failed)))
     else:
         # A compiler accepting the invalid input must still release its context.
-        failed.close()
-        raise RuntimeError('negative control unexpectedly compiled')
+        _nd.invoke('qualification.qualify.close.1', lambda: (failed.close()))
+        raise _nd.raising('qualification.qualify.negative_unexpected_success', _nd.invoke('qualification.qualify.RuntimeError.1', lambda: (RuntimeError('negative control unexpectedly compiled'))))
 
     return {
         'status': 'synthetic_callable_pass',
@@ -87,8 +89,8 @@ def qualify(config, *, native_type=Native, guard=None):
         'numeric_exact': True, 'compile_failure_control': True,
         'owned_context_cleanup': True,
         'tracked_gpu_peak_bytes': peak, 'sampled_device_peak_bytes': peak_device,
-        'python': platform.python_version(), 'numpy': np.__version__,
-        'package_freeze_sha256': digest(HERE / 'freeze.json'),
+        'python': _nd.invoke('qualification.qualify.python_version.1', lambda: (platform.python_version())), 'numpy': np.__version__,
+        'package_freeze_sha256': _nd.invoke('qualification.qualify.digest.1', lambda: (digest(HERE / 'freeze.json'))),
         'native_identity': ({
             'driver_sha256': config['driver']['sha256'],
             'nvrtc_sha256': config['nvrtc']['sha256'],
@@ -106,3 +108,4 @@ def qualify(config, *, native_type=Native, guard=None):
 
 if __name__ == '__main__':
     raise SystemExit('No standalone launch: separately reviewed supervisor required')
+

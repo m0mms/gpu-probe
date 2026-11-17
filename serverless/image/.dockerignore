@@ -9,6 +9,8 @@
 !admission.py
 !attended_guard.py
 !cgroup_alias.py
+!native_diagnostics.py
+!native_operations.py
 !package/
 package/**
 !package/README.md
@@ -17,6 +19,8 @@ package/**
 !package/inherited-hashes.json
 !package/invalid.cu
 !package/native.py
+!package/native_diagnostics.py
+!package/native_operations.py
 !package/probe.cu
 !package/qualification.py
 !package/runtime.py

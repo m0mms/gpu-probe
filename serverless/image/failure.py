@@ -20,11 +20,14 @@ def valid_failure(value):
     if type(value) is not dict:
         return False
     keys = set(value)
-    if keys not in ({'status', 'reason', 'stage'}, {'status', 'reason', 'stage', 'admission'}):
+    if keys not in ({'status', 'reason', 'stage'}, {'status', 'reason', 'stage', 'admission'}, {'status', 'reason', 'stage', 'native'}):
         return False
     if not (value.get('status') == 'synthetic_native_fail'
             and value.get('reason') == 'qualification_failed'
             and type(value.get('stage')) is str and value['stage'] in STAGES):
         return False
+    if 'native' in value:
+        from native_diagnostics import valid as valid_native
+        return value['stage'] == 'native_qualification' and valid_native(value['native'])
     return ('admission' not in value or
             (value['stage'] == 'runtime_admission' and valid(value['admission'])))
