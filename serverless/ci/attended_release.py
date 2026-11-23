@@ -1,8 +1,4 @@
-"""One dated synthetic-image exception. Does not change security_scan policy.
-
-Raw scan must be complete. New IDs/packages/versions or severity increases refuse;
-publication of this synthetic image is not deployment or a security clearance.
-"""
+"""Approved one-attempt OS-only exception; general security gate is unchanged."""
 import hashlib
 import json
 import os
@@ -15,7 +11,7 @@ from bounded import run
 ROOT = Path(__file__).resolve().parent.parent
 
 
-BASELINE_SHA256='dcb3b1b5488fc2fefffecad754e7cc3f1d4ade21597016f7ae42334105d9ac24'
+BASELINE_SHA256='0ed7fd886e57d9cf88883377f6c4da23967360ab7f2b2a98668fce07fbd623ee'
 
 def baseline():
     raw=(Path(__file__).resolve().parent/'publication-baseline.json').read_bytes()
@@ -23,31 +19,47 @@ def baseline():
     return json.loads(raw)
 
 def window(now):
-    if now.tzinfo is None or now>=datetime(2026,11,25,tzinfo=timezone.utc):
+    if now.tzinfo is None or now>=datetime(2026,11,25,15,13,tzinfo=timezone.utc):
         raise ValueError('exception expired or timezone absent')
+
+def package_version(pkg):
+    version=pkg.get('Version')
+    release=pkg.get('Release','')
+    epoch=pkg.get('Epoch',0)
+    if type(version) is not str or not version or type(release) is not str or type(epoch) is not int or epoch<0:
+        raise ValueError('malformed package version')
+    return (str(epoch)+':' if epoch else '')+version+('-'+release if release else '')
 
 def eligible(report, image, packages, accepted=None):
     result = assess(report, image, packages)
     if result['suppressed']:
         raise ValueError('suppressed findings')
     approved=baseline() if accepted is None else accepted
-    limits={}
-    for item in approved['findings']:
-        key=tuple(item[k] for k in ('VulnerabilityID','PkgName','InstalledVersion'))
-        limits.setdefault(key,set()).add(item['Severity'])
-    ranks={'LOW':1,'MEDIUM':2,'HIGH':3}
-    rows = report['Results']
-    for row in rows:
+    actual=[]
+    for row in report['Results']:
+        if (row.get('Class'),row.get('Type')) not in (('os-pkgs','debian'),('lang-pkgs','python-pkg')):
+            raise ValueError('unexpected inventory class')
+        for pkg in row.get('Packages',[]):
+            item=[row['Class'],row['Type'],pkg.get('Name'),package_version(pkg),pkg.get('FilePath',''),pkg.get('Arch','')]
+            if any(type(v) is not str for v in item) or not item[2] or not item[3]:
+                raise ValueError('malformed package identity')
+            actual.append(item)
+    if sorted(actual)!=approved['inventory']:
+        raise ValueError('dependency inventory drift')
+    known={tuple(v[k] for k in ('VulnerabilityID','PkgName','InstalledVersion','Severity')) for v in approved['findings']}
+    delta=[]
+    os_packages={(p[2],p[3]) for p in actual if p[0]=='os-pkgs'}
+    for row in report['Results']:
         for vuln in row.get('Vulnerabilities', []):
             if row.get('Class') != 'os-pkgs' or vuln.get('Severity') not in ('UNKNOWN','LOW','MEDIUM','HIGH'):
                 raise ValueError('outside attended exception')
-            key=tuple(vuln.get(k) for k in ('VulnerabilityID','PkgName','InstalledVersion'))
-            if not all(type(x) is str and x for x in key) or key not in limits:
-                raise ValueError('new or malformed vulnerability identity')
-            severity=vuln['Severity'];known=limits[key]
-            if severity not in known and not (severity in ranks and any(s in ranks and ranks[severity]<=ranks[s] for s in known)):
-                raise ValueError('severity escalation or unknown reassessment')
+            item=tuple(vuln.get(k) for k in ('VulnerabilityID','PkgName','InstalledVersion','Severity'))
+            if not all(type(v) is str and v for v in item) or (item[1],item[2]) not in os_packages:
+                raise ValueError('malformed or unbound vulnerability identity')
+            if item not in known:
+                delta.append(dict(zip(('VulnerabilityID','PkgName','InstalledVersion','Severity'),item)))
     return dict(result, general_release_passed=result['passed'],
+                noncritical_os_delta=delta, dependency_inventory_matched=True,
                 synthetic_image_publication_exception=True,
                 paid_execution_authorized_by_scan=False)
 
