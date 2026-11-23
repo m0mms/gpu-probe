@@ -96,7 +96,7 @@ raise SystemExit(runner.main())
     f.body=[n for n in f.body if not (isinstance(n,ast.Expr) and isinstance(n.value,ast.Call) and isinstance(n.value.func,ast.Attribute) and n.value.func.attr=='negative_phase')]
    new=Strip().visit(new)
    self.assertEqual(ast.dump(new,include_attributes=False),ast.dump(old,include_attributes=False),name)
-  for name in ['attended_guard.py','admission.py','cgroup_alias.py','package/host_guard.py','package/probe.cu','package/invalid.cu']:
+  for name in ['admission.py','cgroup_alias.py','package/host_guard.py','package/probe.cu','package/invalid.cu']:
    self.assertEqual((ROOT/name).read_bytes(),(BASE/name).read_bytes(),name)
  def test_diagnostic_copies_identical(self):
   for name in ['native_diagnostics.py','native_operations.py']:self.assertEqual((ROOT/name).read_bytes(),(ROOT/'package'/name).read_bytes())

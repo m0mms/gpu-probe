@@ -29,18 +29,23 @@ class LayoutTests(unittest.TestCase):
   for cg,mt in [('x'*(1024*1024+1),M),('0::/','x'*(1024*1024+1))]:
    v=g.layout_counts(cg,mt);self.assertEqual(v['cgroup_layout_oversize'],1);self.assertEqual(sum(v.values()),1)
   self.assertEqual(g.layout_counts('','')['mount_records'],0)
- def test_hybrid_still_refuses_before_memory_reads(self):
+ def test_hybrid_requires_verified_v1_view(self):
+  from unittest.mock import patch
+  from cgroup_v1 import V1View
   d.reset()
-  def forbidden(p):raise AssertionError('no guessed memory path')
-  with self.assertRaises(RuntimeError):g.memory_observation('7:memory:/job\n0::/job',V1,forbidden)
+  with patch.object(V1View,'__enter__',side_effect=RuntimeError('unverified')):
+   with self.assertRaises(RuntimeError):g.memory_observation('7:memory:/job\n0::/job',V1,lambda p:'1')
   out=dict(failed('runtime_admission'),admission=d.snapshot())
-  self.assertEqual(out['admission']['code'],'cgroup_mapping')
+  self.assertEqual(out['admission']['code'],'v1_mapping')
   self.assertEqual(out['admission']['facts']['mount_v1_memory_records'],1)
   self.assertTrue(valid_failure(out));self.assertFalse(accepted({'id':'j','status':'COMPLETED','output':out},'j'))
  def test_privacy_and_counter_reset(self):
   d.reset();g.layout_counts('7:memory:/SECRET',V1.replace('/sys/fs/cgroup/memory','/SECRET'))
   for cg,mt in [('7:memory:/SECRET\n0::/SECRET',V1),('0::/','')]:
-   with self.assertRaises(RuntimeError):g.memory_observation(cg,mt,lambda p:'1')
+   from unittest.mock import patch
+   from cgroup_v1 import V1View
+   with patch.object(V1View,'__enter__',side_effect=RuntimeError('unverified')):
+    with self.assertRaises(RuntimeError):g.memory_observation(cg,mt,lambda p:'1')
    self.assertNotIn('SECRET',json.dumps(d.snapshot()));self.assertTrue(d.valid(d.snapshot()))
   self.assertEqual(d.snapshot()['facts']['mount_v1_memory_records'],0)
   for value in [True,'1',2**63]:
@@ -49,6 +54,9 @@ class LayoutTests(unittest.TestCase):
   expected={'establish': '106c43fd3bb7333ac03e05f47ba46610a3c2c7f9c10e9fe7889c9364d3efd638', 'memory_observation': '5e54ab38069912f3fed0bed39af1143a6e10f1b1ccd783b351f358bad5f0a9eb', 'read_views': '8910ce874e2bea68c5195ac623df0b15200e7a204669f123cf058deacb519d56', 'validate_process': 'd874628306be3d185ec0433c86267561a71664580b9c2c521563c010c49f4dca', 'AttendedGuard': '209d32f64ac8783e3c60a89810815964414bff9e98924fe065d5a0e9966b98a0'}
   source=Path(g.__file__).read_text()
   diagnostic="    mark('cgroup_unified', **layout_counts(cgroup_text, mount_text))\n"
+  dispatch="    from cgroup_v1 import membership, observe\n    if membership(cgroup_text) is not None:\n        mark('cgroup_unified', **layout_counts(cgroup_text, mount_text))\n        return observe(cgroup_text, mount_text)\n"
+  self.assertEqual(source.count(dispatch),1)
+  source=source.replace(dispatch,'')
   self.assertEqual(source.count(diagnostic),1)
   source=source.replace(diagnostic,'')
   nodes={n.name:n for n in ast.parse(source).body if isinstance(n,(ast.FunctionDef,ast.ClassDef))}

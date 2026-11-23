@@ -1,5 +1,5 @@
 """Single child process diagnostics. Fixed codes and bounded integer facts only."""
-CODES = frozenset('''admission_start guard_before guard_after platform
+CODES = frozenset('''v1_mapping v1_values v1_stability admission_start guard_before guard_after platform
 cgroup_read mount_read cgroup_unified cgroup_path cgroup_mount cgroup_mapping
 memory_max_read memory_max_parse memory_current_read memory_current_parse
 memory_observation memory_ceiling status_read status_parse rss_parse threads_parse

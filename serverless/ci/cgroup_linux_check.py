@@ -11,18 +11,11 @@ def check():
     counts=guard.layout_counts(cg,mi)
     if counts['cgroup_layout_oversize'] or counts['mount_malformed'] or counts['mount_v2_records']<1:
         raise ValueError('CI structural cgroup view')
-    # Exercise synthetic hybrid rejection in the installed image, without mounts.
-    diagnostics.reset()
-    try:
-        guard.memory_observation('7:memory:/job\n0::/job',
-            '31 22 0:27 / /memory ro - cgroup cgroup rw,memory',
-            lambda path: (_ for _ in ()).throw(AssertionError('unexpected read')))
-    except RuntimeError:
-        facts=diagnostics.snapshot()
-        if facts['code']!='cgroup_mapping' or facts['facts']['mount_v1_memory_records']!=1 or facts['facts']['mount_v2_records']!=0:
-            raise ValueError('CI hybrid diagnostics')
-    else:
-        raise ValueError('CI hybrid admitted')
+    # Positive/negative v1 tests use mocked descriptors; real-v1 evidence is external.
+    import io,unittest,installed_v1_tests
+    result=unittest.TextTestRunner(stream=io.StringIO()).run(unittest.defaultTestLoader.loadTestsFromModule(installed_v1_tests))
+    if result.testsRun!=14 or not result.wasSuccessful():
+        raise ValueError('CI v1 observer controls')
     diagnostics.reset()
     # Exercise installed mapper against the actual bounded CI container.
     observation=guard.memory_observation(cg,mi,lambda name:Path(name).read_text())

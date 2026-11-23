@@ -9,6 +9,7 @@
 !admission.py
 !attended_guard.py
 !cgroup_alias.py
+!cgroup_v1.py
 !native_diagnostics.py
 !native_operations.py
 !package/

@@ -1,12 +1,13 @@
 {
-  ".dockerignore": "f0a388c663d4e3dd3c9fb01fc74674de9c0fe9008ef2cefb1c52208bc660c12d",
-  "Dockerfile.candidate": "9c18173836545064d8413f927ca859079214f2b55394539b74388a4613963427",
+  ".dockerignore": "1c8fe38c2e91e0887daaa6bef964889cfcbd48cfcec42351078691a492096d11",
+  "Dockerfile.candidate": "e158561c0609a6990ad32b383c09bb70ebfdeab5fd3e2937655ccf78d683f034",
   "admission.py": "fc08db0c53d1ba8a6af79b1648a209f5038fc35a8a798e8484ed2abce7fac336",
-  "admission_diagnostics.py": "dc919384ab9bcabbd93bc94abd6413325347e297c1c9c354df1b7fcf5089efb7",
-  "attended_guard.py": "eb0873b426a1803e3f595bd55f2fc58ae94aee991b7a8a60deb4a1e9f12db850",
+  "admission_diagnostics.py": "d0056bbacb687a7ee40355ddd0845eda5ffcb314a70d903574920ea020885840",
+  "attended_guard.py": "02605c569f64b4e59eeecd17651e24bb0ca6ca7f2ada5634a79a40040b0b4dec",
   "bootstrap.py": "8c9cfce585e71fce00156876258b49830639f107bf99263479a78cb98748f529",
   "cgroup_alias.py": "66b0e7ec881b18243f61a15433159c22808dcc461fbf0996d1e993dd03c201e1",
-  "check_context.py": "9680b9c466ab4f713d0f8b75453db08631386f862678fa6c54b45661949c65d2",
+  "cgroup_v1.py": "1b5ccf6fc849f593357c9c3eb75d682516c8eee83c66ec72dcf7792f49f285e3",
+  "check_context.py": "0945fb94bbf85d5974cecd50770c894956debfa3e4cc265994d58cd33a099088",
   "failure.py": "c1e58ab1d49c2e0507e88bc510715416d1a0b0417113ec542c7e49eb6572dcfb",
   "handler.py": "20bec698d50b46b8f80c6755e528fe79474840c6f354479c450d7e9caafa8ddf",
   "native_diagnostics.py": "53bb3797e1c41e6544d88978ae5ed5f5675d59ba4ed90e8212c045be21ee227d",
@@ -28,9 +29,10 @@
   "runner.py": "13dba56b1cb61ad9a2c41128b57b9651c7c487893070ec8dbd536ca8929c3127",
   "test_admission.py": "172032f4f81d07b20c60dbb9dcdfb8156b93d001104e70474cda41db474a9923",
   "test_cgroup_alias.py": "885f1252c2e9197dfbded023515c617347f13da4f74b60bb336f162dd5276bb2",
+  "test_cgroup_v1.py": "0be82339329851ea27196c92ad2eb9b47191815ba312318259069b0d7621e697",
   "test_complete_admission.py": "9515642d55b78b59341b96aba425e3afd52cf1d3505658715efc185355039a4b",
   "test_context.py": "d3d7d76e2b91b8e4434de092755b376c776342118720d8b31bd153cf4a7b634c",
   "test_failure_stages.py": "78f42ba9c79a4e070a754059086e2cbbf0dd0f335b8cd8891af5c895cdd49d5d",
   "test_handler.py": "598b431797734872ce76b8aec25044cafc85980c330a2138bf40534e6c495d71",
-  "test_layout_diagnostics.py": "9b7848ea250aaa633e64bbd9c9bb478a3cc4a2895fccf4f3aeba411893e34c12"
+  "test_layout_diagnostics.py": "24b7b8cc870b5b530d0a48cde572157ca7b69f229994933c7f29e87e99ceaf9f"
 }

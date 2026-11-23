@@ -12,6 +12,9 @@ def check():
     require(sys.prefix=='/opt/venv')
     for name in ('pip','setuptools','wheel','pkg_resources'):
         require(importlib.util.find_spec(name) is None)
+    import hashlib
+    qualified=json.loads((Path(__file__).resolve().parent/'v1-qualified-guard.json').read_text())
+    for name,digest in qualified.items():require(hashlib.sha256((Path('/qualification')/name).read_bytes()).hexdigest()==digest)
     import runpod
     import runpod.serverless as serverless
     from runpod.serverless.modules import rp_job
@@ -61,7 +64,7 @@ def check():
     require(result.testsRun==22 and result.wasSuccessful())
     from cgroup_linux_check import check as cgroup_check
     require(cgroup_check())
-    return {'native_diagnostics_checks':True,'native_diagnostics_test_count':22,'cgroup_layout_checks':True,'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
+    return {'v1_observer_simulation_checks':True,'v1_observer_test_count':14,'v1_guard_source_binding':True,'native_diagnostics_checks':True,'native_diagnostics_test_count':22,'cgroup_layout_checks':True,'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
 if __name__=='__main__':
     fd=os.dup(1)
     with open(os.devnull,'wb') as sink:os.dup2(sink.fileno(),1);os.dup2(sink.fileno(),2)

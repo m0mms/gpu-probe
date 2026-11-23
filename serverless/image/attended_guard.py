@@ -66,6 +66,10 @@ def layout_counts(cgroup_text, mount_text):
 
 def memory_observation(cgroup_text, mount_text, read, alias_factory=AliasView):
     """Resolve one visible cgroup2 mount; refuse ambiguity, escapes and bad reads."""
+    from cgroup_v1 import membership, observe
+    if membership(cgroup_text) is not None:
+        mark('cgroup_unified', **layout_counts(cgroup_text, mount_text))
+        return observe(cgroup_text, mount_text)
     mark('cgroup_unified', cgroup2_mount_count=0, cgroup_match_count=0, cgroup_identity_count=0)
     mark('cgroup_unified', **layout_counts(cgroup_text, mount_text))
     paths = [line[3:] for line in cgroup_text.splitlines() if line.startswith('0::')]
