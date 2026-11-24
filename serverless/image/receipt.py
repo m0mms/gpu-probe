@@ -32,7 +32,7 @@ def valid_output(out):
         return False
     return (type(n['device_ordinal']) is int and n['device_ordinal'] == 0
             and type(n['driver_version']) is int and 12090 <= n['driver_version'] < 100000
-            and type(n['compute']) is list and n['compute'] == [8, 9]
+            and type(n['compute']) is list and n['compute'] == [8, 6]
             and type(n['nvrtc_version']) is list and n['nvrtc_version'] == [12, 9]
             and all(type(v) is int for k in ('compute', 'nvrtc_version') for v in n[k]))
 

@@ -77,7 +77,7 @@ class Tests(unittest.TestCase):
     self.assert_code('driver_discovery');self.assertEqual(d.snapshot()['facts']['driver_resolved_count'],count)
    self.assertEqual(a.driver_path([one]),one.resolve())
  def fake_libraries(self, fail=None, versions=None):
-  values={'count':1,'driver':12090,'major':8,'minor':9,'vm':12,'vn':9};values.update(versions or {})
+  values={'count':1,'driver':12090,'major':8,'minor':6,'vm':12,'vn':9};values.update(versions or {})
   cu=Mock();nv=Mock();order=[]
   def call(name,*args):
    order.append(name)
@@ -126,7 +126,7 @@ class Tests(unittest.TestCase):
    with self.assertRaises(MemoryError):self.observe_with(guard=Mock(side_effect=seq),libs=[cu,nv])
    self.assert_code(code)
   cu,nv,_=self.fake_libraries();guard=Mock();out=self.observe_with(guard=guard,libs=[cu,nv])
-  self.assertEqual(out['compute'],[8,9]);self.assertEqual(guard.call_count,2);self.assert_code('admission_complete')
+  self.assertEqual(out['compute'],[8,6]);self.assertEqual(guard.call_count,2);self.assert_code('admission_complete')
  def test_strict_end_to_end_failure_schema(self):
   d.mark('runtime_compatibility',driver_version=12080,secret='SECRET',rss=True,threads=2**80)
   output=dict(failed('runtime_admission'),admission=d.snapshot())

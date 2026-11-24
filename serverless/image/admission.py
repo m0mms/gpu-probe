@@ -75,7 +75,7 @@ def observe(guard):
     call('nvrtc_version', nv, 'nvrtcVersion', [IP, IP], C.byref(vm), C.byref(vn))
     # Locked NVRTC 12.9; select only a device covered by the CPU compile check.
     mark('runtime_compatibility', driver_version=version.value, nvrtc_major=vm.value, nvrtc_minor=vn.value, compute_major=major.value, compute_minor=minor.value)
-    if version.value < 12090 or [vm.value, vn.value] != [12, 9] or [major.value, minor.value] != [8, 9]:
+    if version.value < 12090 or [vm.value, vn.value] != [12, 9] or [major.value, minor.value] != [8, 6]:
         raise ValueError('unsupported_runtime')
     mark('guard_after')
     guard()

@@ -48,13 +48,14 @@ def check():
         program=P();source=(Path('/qualification/package')/name).read_bytes()
         require(nv.nvrtcCreateProgram(C.byref(program),source,name.encode(),0,None,None)==0)
         try:
-            opts=(C.c_char_p*1)(b'--gpu-architecture=compute_89');code=nv.nvrtcCompileProgram(program,1,opts)
+            opts=(C.c_char_p*1)(b'--gpu-architecture=compute_86');code=nv.nvrtcCompileProgram(program,1,opts)
             if bad:
                 require(code!=0);size=S();require(nv.nvrtcGetProgramLogSize(program,C.byref(size))==0);require(0<size.value<65536)
                 log=C.create_string_buffer(size.value);require(nv.nvrtcGetProgramLog(program,log)==0);require(b'intentional_native_qualification_compile_failure' in log.value)
             else:
                 require(code==0);size=S();require(nv.nvrtcGetPTXSize(program,C.byref(size))==0);require(0<size.value<1048576)
                 ptx=C.create_string_buffer(size.value);require(nv.nvrtcGetPTX(program,ptx)==0);require(b'.entry base' in ptx.value or b'.entry	base' in ptx.value)
+                require(b'.target sm_86' in ptx.value)
         finally:require(nv.nvrtcDestroyProgram(C.byref(program))==0)
     import unittest
     import installed_native_tests
@@ -64,7 +65,7 @@ def check():
     require(result.testsRun==22 and result.wasSuccessful())
     from cgroup_linux_check import check as cgroup_check
     require(cgroup_check())
-    return {'v1_observer_simulation_checks':True,'v1_observer_test_count':14,'v1_guard_source_binding':True,'native_diagnostics_checks':True,'native_diagnostics_test_count':22,'cgroup_layout_checks':True,'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False}
+    return {'v1_observer_simulation_checks':True,'v1_observer_test_count':14,'v1_guard_source_binding':True,'native_diagnostics_checks':True,'native_diagnostics_test_count':22,'cgroup_layout_checks':True,'cgroup_linux_descriptor_checks':True,'sdk_installed_checks':True,'nvrtc_compile_and_negative_control':True,'gpu_execution':False,'provider_contact':False,'compute_target':'compute_86'}
 if __name__=='__main__':
     fd=os.dup(1)
     with open(os.devnull,'wb') as sink:os.dup2(sink.fileno(),1);os.dup2(sink.fileno(),2)
