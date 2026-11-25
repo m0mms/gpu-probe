@@ -98,7 +98,7 @@ def extract_source(tree,archive,digest,prefix,patches,ceiling,progress=None):
         h=hashlib.sha256()
         for b in iter(lambda:raw.read(1048576),b''):h.update(b)
         require(h.hexdigest()==digest,'source changed before extraction');raw.seek(0)
-        with tarfile.open(fileobj=raw,mode='r:gz') as t:
+        with tarfile.open(fileobj=raw,mode='r|gz') as t:
             links=[]
             for m in t:
                 name=m.name[len(prefix):].lstrip('/')
@@ -107,10 +107,9 @@ def extract_source(tree,archive,digest,prefix,patches,ceiling,progress=None):
                     d=tree.directory(name);os.close(d)
                 elif m.issym():links.append((name,m.linkname))
                 elif m.isfile() and name not in patches:
-                    # Hash bounded archive member without retaining whole files.
-                    h=hashlib.sha256();f=t.extractfile(m)
-                    for b in iter(lambda:f.read(1048576),b''):h.update(b)
-                    with t.extractfile(m) as f:tree.write(name,f,m.size,h.hexdigest(),ceiling,bool(m.mode&0o111))
+                    # Inventory hashed every member in one forward pass. Verify
+                    # the copied bytes against that digest without rewinding gzip.
+                    with t.extractfile(m) as f:tree.write(name,f,m.size,checked['member_sha256'][name],ceiling,bool(m.mode&0o111))
             # Overlay files precede all symlinks. Validator forbids link parents.
             for name,r in patches.items():
                 fd=os.open(r['candidate_path'],os.O_RDONLY|os.O_NOFOLLOW)

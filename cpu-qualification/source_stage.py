@@ -12,8 +12,8 @@ def source_inventory(archive,expected_sha256,prefix,overlays):
         for b in iter(lambda:raw.read(1024*1024),b''):h.update(b)
         require(h.hexdigest()==expected_sha256,'source archive digest mismatch')
         raw.seek(0)
-        with tarfile.open(fileobj=raw,mode='r:gz') as t:
-            members={}
+        with tarfile.open(fileobj=raw,mode='r|gz') as t:
+            members={};member_sha256={}
             for m in t:
                 require(m.name==prefix or m.name.startswith(prefix+'/'),'source prefix')
                 name=m.name[len(prefix):].lstrip('/')
@@ -22,6 +22,11 @@ def source_inventory(archive,expected_sha256,prefix,overlays):
                 require(name not in members,'duplicate source member')
                 require(m.isdir() or m.isfile() or m.issym(),'unsupported source member')
                 members[name]=m
+                if m.isfile():
+                    member_hash=hashlib.sha256()
+                    with t.extractfile(m) as source:
+                        for block in iter(lambda:source.read(1048576),b''):member_hash.update(block)
+                    member_sha256[name]=member_hash.hexdigest()
             for name,m in members.items():
                 for parent in PurePosixPath(name).parents:
                     if str(parent) in members:require(members[str(parent)].isdir(),'source parent is not directory')
@@ -50,8 +55,7 @@ def source_inventory(archive,expected_sha256,prefix,overlays):
                     require(name not in members,'new patch shadows original')
                 else:
                     require(name in members and members[name].isfile(),'original patch target not regular')
-                    original=t.extractfile(members[name]).read()
-                    require(hashlib.sha256(original).hexdigest()==patch['original_sha256'],'original patch mismatch')
+                    require(member_sha256[name]==patch['original_sha256'],'original patch mismatch')
                 with open(patch['candidate_path'],'rb') as f:candidate=f.read()
                 require(hashlib.sha256(candidate).hexdigest()==patch['candidate_sha256'],'candidate patch mismatch')
                 records.append({'name':name,'bytes':len(candidate),'sha256':patch['candidate_sha256']})
@@ -62,4 +66,4 @@ def source_inventory(archive,expected_sha256,prefix,overlays):
                 require(target in members and members[target].isfile(),'build entrypoint missing')
             after=os.fstat(raw.fileno())
             require((before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)==(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns),'archive changed during inspection')
-            return {'archive_sha256':expected_sha256,'regular_source_bytes':sum(m.size for m in members.values() if m.isfile()),'patches':records,'members':len(members),'extracted':False,'executed':False}
+            return {'archive_sha256':expected_sha256,'regular_source_bytes':sum(m.size for m in members.values() if m.isfile()),'patches':records,'members':len(members),'extracted':False,'executed':False,'member_sha256':member_sha256}
