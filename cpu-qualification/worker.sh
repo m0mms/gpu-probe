@@ -27,3 +27,5 @@ rm -f /tmp/test_host /tmp/test_host.pub
 printf '\nCDMA_PACKAGES_BEGIN\n'
 dpkg-query -W -f='${binary:Package} ${Version}\n'
 printf 'CDMA_PACKAGES_END\n'
+
+rm -f /tmp/policy.before /tmp/status.before /tmp/sshd-effective

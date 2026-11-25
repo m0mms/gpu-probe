@@ -1,5 +1,5 @@
 """Exact sequential CPU campaign. This script never pulls or publishes images."""
-import json,os,platform,shutil
+import json,os,platform,shutil,time
 from pathlib import Path
 from qualify import execute,require
 ROOT=Path(__file__).resolve().parent
@@ -12,12 +12,16 @@ def preflight():
  require(len(expected)==40 and expected==reviewed==actual,'exact reviewed commit')
  require(shutil.disk_usage(ROOT).free>=8000000000,'free disk admission')
  mem=dict(line.split(':',1) for line in Path('/proc/meminfo').read_text().splitlines());require(int(mem['MemAvailable'].split()[0])*1024>=3*1024**3,'memory admission')
-def sequence(executor=execute):
+def sequence(executor=execute,exporter=None,clock=time.monotonic):
+ started=clock()
  for kind,image,image_id in IMAGES:
+  if exporter is not None:require(clock()-started<=40,'insufficient campaign budget for next bounded build/export/cleanup')
   # An exception from worker prevents entering controller; no retry handler.
-  executor(kind,image,image_id,[(ROOT/'inputs','/inputs'),(ROOT,'/control')],['python','-B','/control/deadline.py',kind],ROOT/'evidence')
+  executor(kind,image,image_id,[(ROOT/'inputs','/inputs'),(ROOT,'/control')],['python','-B','/control/deadline.py',kind],ROOT/'evidence',**({'on_success':exporter} if exporter is not None else {}))
 def main():
- preflight();sequence()
+ preflight()
+ from export_artifacts import Exporter
+ sequence(exporter=Exporter(ROOT/'artifacts'))
 if __name__=='__main__':
  import sys
  if sys.argv[1:]==['preflight']:preflight()

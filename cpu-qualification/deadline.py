@@ -13,7 +13,8 @@ def main():
     if len(sys.argv)!=2 or sys.argv[1] not in ('worker','controller'):raise SystemExit(2)
     budget=remaining(Path('/proc/self/stat').read_text(),float(Path('/proc/uptime').read_text().split()[0]),os.sysconf('SC_CLK_TCK'))
     if budget<=0:raise SystemExit(124)
-    p=subprocess.Popen(['/bin/sh','/control/'+sys.argv[1]+'.sh'],start_new_session=True)
+    env=dict(os.environ,PIP_DISABLE_PIP_VERSION_CHECK='1',PYTHONDONTWRITEBYTECODE='1',HOME='/tmp/qualification-home')
+    p=subprocess.Popen(['/bin/sh','/control/'+sys.argv[1]+'.sh'],start_new_session=True,env=env)
     def stop(signum=None,frame=None):
         try:os.killpg(p.pid,signal.SIGKILL)
         except ProcessLookupError:pass

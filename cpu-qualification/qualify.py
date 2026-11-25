@@ -1,5 +1,5 @@
 """One CPU-only container qualification with approved sampled disk stop.
-No provider calls, image build/push, retry, or arbitrary cleanup.
+No provider calls, image push, retry, or arbitrary cleanup. Optional reviewed export runs only after successful exit.
 """
 import json,time,uuid
 from pathlib import Path
@@ -30,7 +30,7 @@ def verify_controls(c):
     require(h['LogConfig']=={'Type':'json-file','Config':{'max-size':'1m','max-file':'2'}},'log limit')
     require(all(m.get('RW') is False for m in c['Mounts']),'writable input mount')
 
-def execute(kind,image,image_id,mounts,command,outdir,call=docker,clock=time.monotonic,sleep=time.sleep):
+def execute(kind,image,image_id,mounts,command,outdir,call=docker,clock=time.monotonic,sleep=time.sleep,on_success=None):
     require(kind in ('worker','controller'),'test kind')
     outdir=Path(outdir);outdir.mkdir(parents=True,exist_ok=True)
     intent=outdir/(kind+'-intent.json')
@@ -43,8 +43,7 @@ def execute(kind,image,image_id,mounts,command,outdir,call=docker,clock=time.mon
         found=json.loads(call(['image','inspect',image]));require(len(found)==1 and found[0]['Id']==image_id,'pinned image missing/mismatched')
         args=['create','--pull','never','--platform','linux/amd64','--name',name,'--label','qualification.id='+identity,
               '--network','none','--memory',str(MEM),'--memory-swap',str(MEM),'--cpus','2','--pids-limit','256',
-              '--security-opt','no-new-privileges','--log-driver','json-file','--log-opt','max-size=1m','--log-opt','max-file=2',
-              '--env','PIP_DISABLE_PIP_VERSION_CHECK=1','--env','PYTHONDONTWRITEBYTECODE=1','--env','HOME=/tmp/qualification-home']
+              '--security-opt','no-new-privileges','--log-driver','json-file','--log-opt','max-size=1m','--log-opt','max-file=2']
         for source,dest in mounts:
             source=str(Path(source).resolve(strict=True));require(',' not in source and ',' not in dest,'mount syntax')
             args+=['--mount','type=bind,src='+source+',dst='+dest+',readonly']
@@ -63,9 +62,11 @@ def execute(kind,image,image_id,mounts,command,outdir,call=docker,clock=time.mon
             if not c['State']['Running']:
                 require(c['State']['ExitCode']==0,'qualification exit failure');break
             sleep(min(1,SECONDS-elapsed))
-        result['logs']=call(['logs',cid],5);result['status']='passed'
+        result['logs']=call(['logs',cid],5)
+        if on_success is not None:result['artifacts']=on_success(kind,cid,identity,image_id)
+        result['status']='passed'
     except Exception as e:
-        result['failure_type']=type(e).__name__;result['failure']=str(e)[:200]
+        result['failure_type']=type(e).__name__;result['failure']=str(e)[:2000]
     finally:
         try:
             # Known CID was ownership-checked before start; stop it promptly,
