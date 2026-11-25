@@ -5,8 +5,8 @@ ALLOWED={'pypi.org','files.pythonhosted.org','deb.debian.org','security.debian.o
 class Redirect(urllib.request.HTTPRedirectHandler):
  def redirect_request(self,req,fp,code,msg,headers,newurl):
   u=urllib.parse.urlparse(newurl)
-  cdn=u.hostname and (u.hostname=='pkg-containers.githubusercontent.com' or u.hostname.endswith('.cloudflare.docker.com') or u.hostname.endswith('.r2.cloudflarestorage.com') or u.hostname.endswith('.cloudfront.net'))
-  if u.scheme!='https' or not (u.hostname in ALLOWED or cdn):raise ValueError('redirect outside public input sources')
+  cdn=u.hostname and (u.hostname in ('pkg-containers.githubusercontent.com','production.cloudfront.docker.com') or u.hostname.endswith('.cloudflare.docker.com') or u.hostname.endswith('.r2.cloudflarestorage.com') or u.hostname.endswith('.cloudfront.net'))
+  if u.scheme!='https' or not (u.hostname in ALLOWED or cdn):raise ValueError('redirect outside public input sources: host='+ascii((u.hostname or '<missing>')[:253]))
   result=super().redirect_request(req,fp,code,msg,headers,newurl)
   if urllib.parse.urlparse(req.full_url).hostname!=u.hostname:result.remove_header('Authorization')
   return result
