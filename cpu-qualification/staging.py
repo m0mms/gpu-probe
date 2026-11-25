@@ -84,11 +84,15 @@ def copy_manifest(tree,records):
     return {'files':tree.files,'bytes':tree.bytes}
 
 
-def extract_source(tree,archive,digest,prefix,patches,ceiling):
+def extract_source(tree,archive,digest,prefix,patches,ceiling,progress=None):
+    notify=progress if progress is not None else lambda phase: None
+    notify("source_inventory_begin")
     checked=source_inventory(archive,digest,prefix,patches)
+    notify("source_inventory_complete")
     require(checked['regular_source_bytes']+sum(x['bytes'] for x in checked['patches'])<=ceiling,'source expansion budget')
     # Recheck archive identity across inspection and extraction. A future caller
     # stages this immutable archive inside the private quota filesystem first.
+    notify("source_extraction_begin")
     with open(archive,'rb') as raw:
         st=os.fstat(raw.fileno())
         h=hashlib.sha256()
@@ -115,4 +119,5 @@ def extract_source(tree,archive,digest,prefix,patches,ceiling):
                     tree.write(name,f,s.st_size,r['candidate_sha256'],ceiling)
             for name,target in links:tree.symlink(name,target)
         end=os.fstat(raw.fileno());require((st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns,st.st_ctime_ns)==(end.st_dev,end.st_ino,end.st_size,end.st_mtime_ns,end.st_ctime_ns),'archive changed during extraction')
+    notify("source_extraction_complete")
     return {'files':len(tree.files),'bytes':tree.bytes,'links':len(links)}
