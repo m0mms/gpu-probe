@@ -1,0 +1,57 @@
+{
+  "sky/adaptors/runpod.py": {
+    "original_sha256": "243f0e35047e3c85e0170aa2e97ba7eb1c76930e053a8a3c17d56ad3544d6e21",
+    "candidate_path": "/control/overlay/sky/adaptors/runpod.py",
+    "candidate_sha256": "243f0e35047e3c85e0170aa2e97ba7eb1c76930e053a8a3c17d56ad3544d6e21"
+  },
+  "sky/provision/common.py": {
+    "original_sha256": "8d58ac81b70658286dd57c2c52247bb58f42d5c0553ba488bd27ad856f4584ba",
+    "candidate_path": "/control/overlay/sky/provision/common.py",
+    "candidate_sha256": "8d58ac81b70658286dd57c2c52247bb58f42d5c0553ba488bd27ad856f4584ba"
+  },
+  "sky/provision/instance_setup.py": {
+    "original_sha256": "21e1f9f4bd1e2c8cab0df7e0e5d306e6c26e02cfd79f045aab07f336020d5f56",
+    "candidate_path": "/control/overlay/sky/provision/instance_setup.py",
+    "candidate_sha256": "d64582bb13b9e9cada2b00ac37aeddcebe0ded0907595ca3016f2cdb2cf884f6"
+  },
+  "sky/provision/provisioner.py": {
+    "original_sha256": "80b1b85906607d4fa42da34f52775c1f955456767407bbcd2e09ea05c5733805",
+    "candidate_path": "/control/overlay/sky/provision/provisioner.py",
+    "candidate_sha256": "701976d08ebab3c9c8d50c99e4a11741b2e65a04ee8ee4ac29d13cef7ae63225"
+  },
+  "sky/provision/runpod/config.py": {
+    "original_sha256": "f6e9592552fb9c7bb18537688fc0fb94d9fb49d89c279cdce8521c1c81bdb5c8",
+    "candidate_path": "/control/overlay/sky/provision/runpod/config.py",
+    "candidate_sha256": "f6e9592552fb9c7bb18537688fc0fb94d9fb49d89c279cdce8521c1c81bdb5c8"
+  },
+  "sky/provision/runpod/instance.py": {
+    "original_sha256": "001bdecd654043464a165d9282f5cdd4b19fae2bef90b7bf4a75cc955da9288f",
+    "candidate_path": "/control/overlay/sky/provision/runpod/instance.py",
+    "candidate_sha256": "b9d94539c7d799c52fa7ea10deb4e36a4e0914b6e84a592ff55b7786827ca36e"
+  },
+  "sky/provision/runpod/utils.py": {
+    "original_sha256": "d3c4af278036efdd21e8a7d8cfd856a6ac3b7342718768a4b8bed82a31f4bf45",
+    "candidate_path": "/control/overlay/sky/provision/runpod/utils.py",
+    "candidate_sha256": "dd79529102c93725c785322835978633caedbf79ad965e1701a9179b113d9c51"
+  },
+  "sky/utils/cluster_utils.py": {
+    "original_sha256": "327e11891cd02c0a7ffdf2cb01d7f636dda1f166963c35a0fc8de7e7ef9458d9",
+    "candidate_path": "/control/overlay/sky/utils/cluster_utils.py",
+    "candidate_sha256": "cf59ff710fe8cfc72f5b87417cc4fd9a5130d7981d88170441fd1620ad1cf13c"
+  },
+  "sky/utils/command_runner.py": {
+    "original_sha256": "042e3379bfc6b3c7e1f546918cecacb9392d688f6eba15280ab5794ad7f4ecf2",
+    "candidate_path": "/control/overlay/sky/utils/command_runner.py",
+    "candidate_sha256": "f1c3e7bedc29cd89fc686f1dd0db00a52a426d7cc360f2027703611efeddd8c4"
+  },
+  "sky/utils/subprocess_utils.py": {
+    "original_sha256": "63e1392356d79eedaa7191a311473ac32ba363a95f0fa8e608ef2b7557ae214c",
+    "candidate_path": "/control/overlay/sky/utils/subprocess_utils.py",
+    "candidate_sha256": "63e1392356d79eedaa7191a311473ac32ba363a95f0fa8e608ef2b7557ae214c"
+  },
+  "sky/utils/host_auth.py": {
+    "original_sha256": null,
+    "candidate_path": "/control/overlay/sky/utils/host_auth.py",
+    "candidate_sha256": "ba601ad0cb6247577f2ae19e286cbf5ad7209a01b518ecc7c8fc013ef3abf3ec"
+  }
+}

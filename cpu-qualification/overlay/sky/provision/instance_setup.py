@@ -1,0 +1,1074 @@
+"""Setup dependencies & services for instances."""
+import base64
+from concurrent import futures
+import functools
+import gzip
+import hashlib
+import io
+import json
+import os
+import re
+import shlex
+import tarfile
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from sky import exceptions
+from sky import logs
+from sky import provision
+from sky import resources as resources_lib
+from sky import sky_logging
+from sky import skypilot_config
+from sky.logs import agent as logs_agent
+from sky.provision import common
+from sky.provision import docker_utils
+from sky.provision import logging as provision_logging
+from sky.provision import metadata_utils
+from sky.skylet import constants
+from sky.usage import constants as usage_constants
+from sky.usage import usage_lib
+from sky.utils import accelerator_registry
+from sky.utils import command_runner
+from sky.utils import common_utils
+from sky.utils import env_options
+from sky.utils import resources_utils
+from sky.utils import source_utils
+from sky.utils import subprocess_utils
+from sky.utils import timeline
+from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
+
+_MAX_RETRY = 6
+
+# Default wall-clock bounds for a single provisioning-phase remote command /
+# file sync, overridable via the `provision` section of ~/.sky/config.yaml.
+#
+# Without a bound, a wedged transport hangs `sky launch` forever with no
+# recovery: the cluster stays INIT, and a `sky serve up` controller stuck in
+# INIT cannot even be torn down. The motivating case is a `kubectl exec` stream
+# that transfers every byte but never delivers EOF, leaving both ends idle
+# indefinitely (skypilot-org/skypilot#10167).
+#
+# These are deliberately generous: a legitimate setup on a slow network can
+# take many minutes. Their job is to turn "hangs forever, silently" into
+# "fails, then retries" so the existing _auto_retry can recover -- not to
+# police slowness.
+#
+# Trade-off: a timeout kills only the local `ssh` / `kubectl exec` client. The
+# remote command runs without a pty/tty, so it is not signalled and keeps
+# running. For the wedged-stream case that is harmless (the remote side has
+# already finished; only EOF is lost), but if a command is genuinely slower
+# than the bound, the retry starts it again while the first copy is still
+# running on the node. The generous defaults are what keep that path rare;
+# raise the bound (or set it non-positive) for setups that legitimately take
+# longer.
+_DEFAULT_SETUP_COMMAND_TIMEOUT = 1800
+# Printed by the Kubernetes pod startup (kubernetes-ray.yml.j2) when the image
+# has no sshd and it could not be installed.
+NO_SSHD_MARKER = 'WARNING: sshd is not installed in this image'
+_DEFAULT_FILE_MOUNT_TIMEOUT = 600
+
+
+def _timeout_from_config(key: str, default: int) -> Optional[int]:
+    """Reads a provisioning timeout (seconds) from the SkyPilot config.
+
+    Read at call time rather than import time so that per-request config
+    overrides (and remote API servers) see the right value. A non-positive
+    value disables the bound, restoring the previous unbounded behavior as an
+    escape hatch.
+    """
+    value = skypilot_config.get_nested(('provision', key), default)
+    if not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _setup_command_timeout() -> Optional[int]:
+    """Bound for setup commands, ray start, skylet start and logging setup."""
+    return _timeout_from_config('setup_command_timeout',
+                                _DEFAULT_SETUP_COMMAND_TIMEOUT)
+
+
+def _file_mount_timeout() -> Optional[int]:
+    """Bound for one remote operation of an internal file mount.
+
+    Applied separately to the mkdir and to the rsync, so a single mount can
+    take up to twice this value. That is deliberate -- they are independent
+    commands and either can wedge on its own -- but it means this is a
+    per-operation bound, not a per-mount one.
+    """
+    return _timeout_from_config('file_mount_timeout',
+                                _DEFAULT_FILE_MOUNT_TIMEOUT)
+
+
+# The open files (nofile) limit we want for ray. Ray recommends at least
+# 65535; 1048576 is the higher value SkyPilot's templates apply everywhere
+# else (e.g. the limits.conf entries in the *-ray.yml.j2 templates).
+# https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
+# TODO(kevin): ray only asks for 65535 (its own tooling uses `ulimit -n
+# 65536`); consider lowering this to 65536.
+_TARGET_NOFILE = 1048576
+
+# Increase the limit of the number of open files for the raylet process,
+# as the `ulimit` may not take effect at this point, because it requires
+# all the sessions to be reloaded. This is a workaround.
+#
+# Raising a process' *hard* limit requires CAP_SYS_RESOURCE, which containers
+# usually do not have. Setting both limits to _TARGET_NOFILE therefore fails
+# outright whenever the container's hard limit is lower (1024:524288 -- the
+# systemd default, which containerd 2.0+, Docker and CRI-O deliberately
+# inherit -- is common), leaving the raylet with the low default soft limit and
+# running it out of file descriptors once many workers start. Fall back to
+# raising the *soft* limit only, up to the raylet's own hard limit (the
+# `<hard>:` form), which needs no capability. The hard limit is read from
+# /proc/<pid>/limits (field 5 of the "Max open files" row) so that it is the
+# raylet's own limit rather than this shell's.
+#
+# Probe with `command -v`, not `which`: minimal non-Debian images
+# (RHEL/UBI/Rocky) ship no `which` binary, so `which prlimit` exits 127 there.
+# That matters because this string is appended LAST to the Ray *worker* start
+# command, so on Kubernetes its exit status becomes the worker's entire
+# runtime-setup step status: a 127 writes runtime-setup.failed and kills the
+# worker pod, failing every multi-node launch on such an image. Reproduced on
+# 2-node rockylinux:9, where Ray itself had started fine. The head is
+# unaffected -- its command ends in RAY_HEAD_WAIT_INITIALIZED_COMMAND, a
+# `while` loop that always returns 0.
+#
+# Trailing `true` for the same reason: this tuning is best-effort and must
+# never decide the exit status of what it is appended to, whichever part fails.
+# `pgrep` is absent on those images too (no procps), which would otherwise
+# poison the status even with the probe fixed.
+#
+# Inlined into ibm-ray.yml.j2 as `ray_prlimit_command`.
+RAY_PRLIMIT = (
+    'command -v prlimit >/dev/null 2>&1 && '
+    'for id in $(pgrep -f raylet/raylet); do '
+    'hard=$(awk \'/Max open files/ {print $5}\' /proc/$id/limits); '
+    f'sudo prlimit --nofile={_TARGET_NOFILE}:{_TARGET_NOFILE} --pid=$id '
+    '2>/dev/null || sudo prlimit --nofile="$hard:" --pid=$id || '
+    'echo "Failed to raise the open files limit of raylet $id." >&2; done; '
+    'true;')
+
+# Raise the *soft* open files limit of the current shell to _TARGET_NOFILE,
+# falling back to the hard limit when that is lower (see RAY_PRLIMIT above for
+# why the hard limit cannot simply be raised). `-Sn` rather than plain `-n` is
+# deliberate: `-n` sets both limits, which would *lower* a hard limit that is
+# already higher than (or unlimited compared to) _TARGET_NOFILE.
+#
+# Inlined into kubernetes-ray.yml.j2 as `raise_nofile_limit_command`.
+RAISE_NOFILE_LIMIT_CMD = (f'ulimit -Sn {_TARGET_NOFILE} 2>/dev/null || '
+                          'ulimit -Sn "$(ulimit -Hn)" || true')
+
+DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
+                  f'runtime_dir = os.path.expanduser(os.environ.get('
+                  f'"{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}", "~")); '
+                  f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+                  f'open(os.path.join(runtime_dir, '
+                  f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
+                  'encoding="utf-8"))\';')
+
+_HOST_NETWORK_PROBE_TARGET = '/tmp/sky_host_network_probe.py'
+# A pod created before the server assigned ports has none in its env; its
+# own probe wrote them here at boot, so a re-run on it reads them back. A
+# worker keeps the head port the provisioner exported: the saved one is stale
+# once the head is replaced.
+_LEGACY_HOST_NETWORK_PORTS_ENV = '/tmp/sky_host_network_ports.env'
+_SOURCE_LEGACY_HOST_NETWORK_PORTS = (
+    'if [ -z "${SKYPILOT_SSHD_PORT:-}" ] && '
+    f'[ -f {_LEGACY_HOST_NETWORK_PORTS_ENV} ]; then '
+    '_sky_head_gcs="${SKYPILOT_RAY_PORT:-}"; '
+    f'. {_LEGACY_HOST_NETWORK_PORTS_ENV}; '
+    '[ -z "$_sky_head_gcs" ] || export SKYPILOT_RAY_PORT="$_sky_head_gcs"; '
+    'fi; ')
+
+_RAY_PATCHES_TARGET_DIR = '/tmp/sky_ray_patches'
+
+
+@functools.lru_cache(maxsize=1)
+def _ray_patches_b64() -> str:
+    """The ray_patches directory as a base64 gzipped tar.
+
+    Cached rather than module-level for the same reason as the host-network
+    probe: it is only needed when building a launch command.
+
+    Every timestamp is pinned to 0 so the payload is byte-identical across
+    renders -- it lands in the cluster YAML, and a payload that changed per
+    launch would change the config hash and force needless re-provisioning.
+    """
+    src_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'skylet',
+        'ray_patches')
+    names = sorted(
+        n for n in os.listdir(src_dir)
+        if n == 'apply_patches.py' or n.endswith(('.patch', '.diff')))
+    buf = io.BytesIO()
+    # mtime=0 on the GzipFile, a fixed TarInfo per member, and an explicit tar
+    # format, so nothing in the archive varies with the filesystem or with the
+    # Python version rendering it (tarfile.DEFAULT_FORMAT has changed before).
+    with gzip.GzipFile(fileobj=buf, mode='wb', mtime=0) as gz:
+        with tarfile.open(fileobj=gz, mode='w',
+                          format=tarfile.GNU_FORMAT) as tar:
+            for name in names:
+                with open(os.path.join(src_dir, name), 'rb') as f:
+                    data = f.read()
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                info.mtime = 0
+                info.mode = 0o644
+                info.uid = info.gid = 0
+                info.uname = info.gname = ''
+                tar.addfile(info, io.BytesIO(data))
+    return base64.b64encode(buf.getvalue()).decode('ascii')
+
+
+def ray_patches_cmd(ray_version: str) -> str:
+    """Shell snippet that patches Ray from a payload carried in the pod spec.
+
+    Kubernetes patches Ray from the pod's own args, which run before the
+    SkyPilot wheel is uploaded. Reading the patches out of whatever
+    `pip install skypilot` resolved to would take them from an unrelated
+    release, whose patches target an unrelated Ray version.
+
+    The version check is part of this command rather than a separate guard in
+    the template, so the version the patches are applied *against* and the
+    version they were *generated for* cannot drift apart. A node running some
+    other Ray is skipped without failing -- patching it with files generated
+    for a different Ray is what corrupts it -- but it says so: an image with a
+    baked Ray at another version gets no patches, and silence there leaves
+    "why are my Ray patches missing" with nothing to go on.
+    """
+    apply = (f'mkdir -p {_RAY_PATCHES_TARGET_DIR} && '
+             f'echo \'{_ray_patches_b64()}\' | base64 -d | '
+             f'tar xzf - -C {_RAY_PATCHES_TARGET_DIR} && '
+             f'{constants.SKY_PYTHON_CMD} '
+             f'{_RAY_PATCHES_TARGET_DIR}/apply_patches.py '
+             f'--ray-version {ray_version}')
+    # "not found" rather than "is not installed": the guard also comes out
+    # false when uv itself fails, and that must not read as a claim about
+    # which Ray is installed.
+    skipped = (f'echo "Ray {ray_version} not found in the SkyPilot runtime '
+               'env; skipping SkyPilot\'s Ray patches."')
+    return (f'if {constants.SKY_UV_PIP_CMD} list | grep "ray " | '
+            f'grep {ray_version} > /dev/null 2>&1; then {apply}; '
+            f'else {skipped}; fi')
+
+
+@functools.lru_cache(maxsize=1)
+def _host_network_probe_b64() -> str:
+    # Cached, not module-level: instance_setup is imported on every `import
+    # sky`, but the probe payload is only needed when actually building a
+    # launch command, so the read/minify/gzip cost stays off the CLI path.
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        'kubernetes', 'host_network_probe.py')
+    with open(path, 'r', encoding='utf-8') as f:
+        source = f.read()
+    minified = source_utils.minify_python_source(source)
+    # Sanity-check: minified source must still parse.
+    compile(minified, path, 'exec')
+    compressed = gzip.compress(minified.encode('utf-8'))
+    return base64.b64encode(compressed).decode('ascii')
+
+
+def _host_network_probe_cmd(mode: str) -> str:
+    """Bash snippet verifying the assigned host ports under hostNetwork.
+
+    Returns a runtime-gated snippet: a no-op shell branch unless
+    SKYPILOT_HOST_NETWORK=1 is set in the pod env. Non-hostNetwork
+    bootstraps see no change — env vars stay unset and ``${VAR:-default}``
+    in the ray flags falls back to the constants.
+
+    The ports themselves arrive in the pod env, written into the spec by
+    the server; this only proves they are free before ray takes them.
+
+    Also rebinds the pod's sshd to the assigned SKYPILOT_SSHD_PORT. Under
+    hostNetwork the node's own sshd already owns host:22 so the pod's
+    sshd silently failed to bind in apt-ssh-setup; rewriting Port in
+    sshd_config and restarting picks up the assigned port instead.
+
+    The probe is shipped gzip+base64-inline rather than invoked as a
+    module because the K8s template installs stable skypilot from PyPI
+    before ray_head_start_command runs (the dev wheel ships later), so
+    neither `python -m sky.provision.kubernetes.host_network_probe` nor
+    a site-packages file lookup is reliable at probe time. The b64 form
+    also keeps the payload on a single line, which is required to stay
+    inside the rendered YAML's block-scalar indentation. Gzip cuts the
+    payload by ~4x; the source on disk stays readable.
+    """
+    assert mode in ('head', 'worker'), mode
+    return (
+        # Gated on SKYPILOT_HOST_NETWORK alone. It used to also require
+        # SKYPILOT_RAY_PORTS_CONFIGMAP_NAME, and the sshd_config rewrite below
+        # is inside this same `fi` -- so dropping that env var without
+        # rewriting the gate would silently no-op the whole branch and leave
+        # sshd on 22, where the K8s node's own sshd listens.
+        'if [ "${SKYPILOT_HOST_NETWORK:-0}" = "1" ]; then '
+        f'echo \'{_host_network_probe_b64()}\' | base64 -d | gunzip > '
+        f'{_HOST_NETWORK_PROBE_TARGET}; ' + _SOURCE_LEGACY_HOST_NETWORK_PORTS +
+        f'{constants.SKY_PYTHON_CMD} {_HOST_NETWORK_PROBE_TARGET} '
+        f'--mode {mode} || exit 1; '
+        # Delete-then-append rather than sed-in-place: sshd_config files
+        # without an existing Port directive would otherwise keep the
+        # default 22 (where the K8s node's own sshd already listens).
+        'if [ -n "${SKYPILOT_SSHD_PORT:-}" ]; then '
+        'sudo sh -c "'
+        'sed -i -E \'/^[[:space:]]*#?[[:space:]]*Port[[:space:]]+/d\' '
+        '/etc/ssh/sshd_config && '
+        'echo Port ${SKYPILOT_SSHD_PORT} >> /etc/ssh/sshd_config && '
+        'service ssh restart"; '
+        'fi; '
+        'fi; ')
+
+
+# Stdlib only — deliberately doesn't import `sky` so the read still
+# works during the K8s bootstrap's brief stable→dev skypilot reinstall
+# window. Falls back to SKY_REMOTE_RAY_PORT (not legacy 6379) so the
+# health-check poll lands on something Ray could plausibly be on.
+_READ_RAY_PORT_PY = (
+    'import json, os; '
+    'd = os.path.expanduser(os.environ.get('
+    f'\'{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}\', \'~\')); '
+    'print(json.load(open(os.path.join(d, '
+    f'\'{constants.SKY_REMOTE_RAY_PORT_FILE}\')))[\'ray_port\'])')
+_RAY_PORT_COMMAND = (
+    f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c "{_READ_RAY_PORT_PY}" '
+    f'2> /dev/null || echo {constants.SKY_REMOTE_RAY_PORT});'
+    f'{constants.SKY_PYTHON_CMD} -c "from sky.utils import message_utils; '
+    'print(message_utils.encode_payload({\'ray_port\': $RAY_PORT}))"')
+
+# Command that calls `ray status` with SkyPilot's Ray port set.
+RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND = (
+    f'{_RAY_PORT_COMMAND}; '
+    f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_RAY_CMD} status')
+
+# `ray status` keeps a node under `Active:` after the GCS has marked it dead
+# (on Ray 2.56.1 it never drops off), so counting its node lines over-reports
+# after any node loss -- a resize-down, a preemption, a replaced worker. Ask
+# the GCS node table instead (state 0 is ALIVE). A bare GcsClient rather than
+# ray.init(): that starts a driver and a worker and leaves their logs on the
+# head per check, which a status refresh would pile up. Its per-node value is
+# a dict on Ray 2.9.3 and a GcsNodeInfo message on 2.56.1.
+# Nothing listening on the port prints the "Ray cluster is not found" line
+# that `ray status` printed up to Ray 2.9.3 and the health check keys on.
+_ALIVE_NODES_PY = (
+    'import os, socket, sys; '
+    'a = os.environ["RAY_ADDRESS"]; h, p = a.rsplit(":", 1); '
+    's = socket.socket(); s.settimeout(5); '
+    's.connect_ex((h, int(p))) == 0 or '
+    'sys.exit(print("Ray cluster is not found at", a) or 1); '
+    's.close(); '
+    'from ray._raylet import GcsClient; '
+    'ns = GcsClient(address=a).get_all_node_info(timeout=10).values(); '
+    'st = [n["state"] if isinstance(n, dict) else n.state for n in ns]; '
+    'print("SKY_ALIVE_NODES", st.count(0), len(st))')
+RAY_ALIVE_NODE_COUNT_COMMAND = (
+    f'{_RAY_PORT_COMMAND}; '
+    f'RAY_ADDRESS=127.0.0.1:$RAY_PORT {constants.SKY_PYTHON_CMD} '
+    f'-c {shlex.quote(_ALIVE_NODES_PY)}')
+# Parses RAY_ALIVE_NODE_COUNT_COMMAND's output: alive count, total count.
+RAY_ALIVE_NODES_PATTERN = re.compile(r'^SKY_ALIVE_NODES (\d+) (\d+)$',
+                                     re.MULTILINE)
+
+# Command that waits for the ray status to be initialized. Otherwise, a later
+# `sky status -r` may fail due to the ray cluster not being ready.
+# Reads SKYPILOT_RAY_PORT (exported by the hostNetwork probe) rather than
+# the constants.RAY_STATUS literal — the probe picks a dynamic port.
+_RAY_HEAD_WAIT_TIMEOUT_SECONDS = 120
+# After `ray start --head`, `ray status` exits non-zero until the GCS is up,
+# then exits 0 printing "No cluster status." until the autoscaler first
+# reports (a few seconds, on both Ray 2.9.3 and 2.56.1). Wait past both.
+# Deadline rather than an iteration count, because a failing `ray status`
+# takes ~35s to return on 2.56.1.
+RAY_HEAD_WAIT_INITIALIZED_COMMAND = (
+    f'_sky_deadline=$(( $(date +%s) + {_RAY_HEAD_WAIT_TIMEOUT_SECONDS} )); '
+    'while [ $(date +%s) -lt $_sky_deadline ]; do '
+    '_sky_ray_status=$(RAY_ADDRESS=127.0.0.1:${SKYPILOT_RAY_PORT:-'
+    f'{constants.SKY_REMOTE_RAY_PORT}}} '
+    f'{constants.SKY_RAY_CMD} status 2>&1) && '
+    'case "$_sky_ray_status" in *"No cluster status."*) ;; *) break ;; esac; '
+    'echo "Waiting ray cluster to be initialized"; '
+    'sleep 0.5; '
+    'done;')
+
+# Restart skylet when the version does not match to keep the skylet up-to-date.
+# We need to activate the python environment to make sure autostop in skylet
+# can find the cloud SDK/CLI in PATH.
+MAYBE_SKYLET_RESTART_CMD = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV}; '
+                            f'{constants.SKY_PYTHON_CMD} -m '
+                            'sky.skylet.attempt_skylet;')
+
+
+def _set_usage_run_id_cmd() -> str:
+    """Gets the command to set the usage run id.
+
+    The command saves the current usage run id to the file, so that the skylet
+    can use it to report the heartbeat.
+
+    We use a function instead of a constant so that the usage run id is the
+    latest one when the function is called.
+    """
+    return (
+        f'cat {usage_constants.USAGE_RUN_ID_FILE} 2> /dev/null || '
+        # The run id is retrieved locally for the current run, so that the
+        # remote cluster will be set with the same run id as the initial
+        # launch operation.
+        f'echo "{usage_lib.messages.usage.run_id}" > '
+        f'{usage_constants.USAGE_RUN_ID_FILE}')
+
+
+def _auto_retry(should_retry: Callable[[Exception], bool] = lambda _: True):
+    """Decorator that retries the function if it fails.
+
+    This decorator is mostly for SSH disconnection issues, which might happen
+    during the setup of instances.
+    """
+
+    def decorator(func):
+
+        @functools.wraps(func)
+        def retry(*args, **kwargs):
+            backoff = common_utils.Backoff(initial_backoff=1,
+                                           max_backoff_factor=5)
+            for retry_cnt in range(_MAX_RETRY):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:  # pylint: disable=broad-except
+                    if not should_retry(e) or retry_cnt >= _MAX_RETRY - 1:
+                        raise
+                    sleep = backoff.current_backoff()
+                    logger.info(
+                        f'{func.__name__}: Retrying in {sleep:.1f} seconds, '
+                        f'due to {e}')
+                    time.sleep(sleep)
+
+        return retry
+
+    return decorator
+
+
+def _hint_worker_log_path(cluster_name: str, cluster_info: common.ClusterInfo,
+                          stage_name: str):
+    if cluster_info.num_instances > 1:
+        worker_log_path = metadata_utils.get_instance_log_dir(
+            cluster_name, '*') / (stage_name + '.log')
+        logger.info(f'Logs of worker nodes can be found at: {worker_log_path}')
+
+
+class SSHThreadPoolExecutor(futures.ThreadPoolExecutor):
+    """ThreadPoolExecutor that kills children processes on exit."""
+
+    def submit(self, fn, /, *args, **kwargs):
+        # Copy per submission: a Context cannot be entered concurrently.
+        import contextvars
+        caller = contextvars.copy_context()
+        return super().submit(caller.run, fn, *args, **kwargs)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # ssh command runner eventually calls
+        # log_lib.run_with_log, which will spawn
+        # subprocesses. If we are exiting the context
+        # we need to kill the children processes
+        # to avoid leakage.
+        subprocess_utils.kill_children_processes()
+        self.shutdown()
+        return False
+
+
+def _parallel_ssh_with_cache(func,
+                             cluster_name: str,
+                             stage_name: str,
+                             digest: Optional[str],
+                             cluster_info: common.ClusterInfo,
+                             ssh_credentials: Dict[str, Any],
+                             max_workers: Optional[int] = None) -> List[Any]:
+    if max_workers is None:
+        # Not using the default value of `max_workers` in ThreadPoolExecutor,
+        # as 32 is too large for some machines.
+        max_workers = subprocess_utils.get_parallel_threads(
+            cluster_info.provider_name)
+    with SSHThreadPoolExecutor(max_workers=max_workers) as pool:
+        results = []
+        runners = provision.get_command_runners(cluster_info.provider_name,
+                                                cluster_info, **ssh_credentials)
+        # instance_ids is guaranteed to be in the same order as runners.
+        instance_ids = cluster_info.instance_ids()
+        for i, runner in enumerate(runners):
+            cache_id = instance_ids[i]
+            wrapper = metadata_utils.cache_func(cluster_name, cache_id,
+                                                stage_name, digest)
+            if i == 0:
+                # Log the head node's output to the provision.log
+                log_path_abs = str(provision_logging.get_log_path())
+            else:
+                log_dir_abs = metadata_utils.get_instance_log_dir(
+                    cluster_name, cache_id)
+                log_path_abs = str(log_dir_abs / (stage_name + '.log'))
+            results.append(pool.submit(wrapper(func), runner, log_path_abs))
+
+        return [future.result() for future in results]
+
+
+@common.log_function_start_end
+def initialize_docker(cluster_name: str, docker_config: Dict[str, Any],
+                      cluster_info: common.ClusterInfo,
+                      ssh_credentials: Dict[str, Any]) -> Optional[str]:
+    """Setup docker on the cluster."""
+    if not docker_config:
+        return None
+    _hint_worker_log_path(cluster_name, cluster_info, 'initialize_docker')
+
+    @_auto_retry(should_retry=lambda e: isinstance(e, exceptions.CommandError)
+                 and e.returncode == 255)
+    def _initialize_docker(runner: command_runner.CommandRunner, log_path: str):
+        docker_user = docker_utils.DockerInitializer(docker_config, runner,
+                                                     log_path).initialize()
+        logger.debug(f'Initialized docker user: {docker_user}')
+        return docker_user
+
+    docker_users = _parallel_ssh_with_cache(
+        _initialize_docker,
+        cluster_name,
+        stage_name='initialize_docker',
+        # Should not cache docker setup, as it needs to be
+        # run every time a cluster is restarted.
+        digest=None,
+        cluster_info=cluster_info,
+        ssh_credentials=ssh_credentials)
+    logger.debug(f'All docker users: {docker_users}')
+    assert len(set(docker_users)) == 1, docker_users
+    return docker_users[0]
+
+
+@common.log_function_start_end
+@timeline.event
+def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
+                             cluster_info: common.ClusterInfo,
+                             ssh_credentials: Dict[str, Any]) -> None:
+    """Setup internal dependencies."""
+    _hint_worker_log_path(cluster_name, cluster_info,
+                          'setup_runtime_on_cluster')
+    # compute the digest
+    digests = []
+    for cmd in setup_commands:
+        digests.append(hashlib.sha256(cmd.encode()).digest())
+    hasher = hashlib.sha256()
+    for d in digests:
+        hasher.update(d)
+    digest = hasher.hexdigest()
+
+    @_auto_retry()
+    def _setup_node(runner: command_runner.CommandRunner,
+                    log_path: str) -> bool:
+        """Returns whether the node reported that it has no sshd."""
+        no_sshd = False
+        for cmd in setup_commands:
+            returncode, stdout, stderr = runner.run_setup(
+                cmd,
+                stream_logs=False,
+                log_path=log_path,
+                require_outputs=True,
+                # Installing dependencies requires source bashrc to access
+                # conda.
+                source_bashrc=True,
+                timeout=_setup_command_timeout())
+            retry_cnt = 0
+            while returncode == 255 and retry_cnt < _MAX_RETRY:
+                # Got network connection issue occur during setup. This could
+                # happen when a setup step requires a reboot, e.g. nvidia-driver
+                # installation (happens for fluidstack). We should retry for it.
+                logger.info('Network connection issue during setup, this is '
+                            'likely due to the reboot of the instance. '
+                            'Retrying setup in 10 seconds.')
+                time.sleep(10)
+                retry_cnt += 1
+                returncode, stdout, stderr = runner.run_setup(
+                    cmd,
+                    stream_logs=False,
+                    log_path=log_path,
+                    require_outputs=True,
+                    source_bashrc=True,
+                    timeout=_setup_command_timeout())
+                if not returncode:
+                    break
+
+            if returncode:
+                raise RuntimeError(
+                    'Failed to run setup commands on an instance. '
+                    f'(exit code {returncode}). Error: '
+                    f'===== stdout ===== \n{stdout}\n'
+                    f'===== stderr ====={stderr}')
+            no_sshd = no_sshd or NO_SSHD_MARKER in stdout
+        return no_sshd
+
+    # Cached nodes return None and are not counted.
+    results = _parallel_ssh_with_cache(_setup_node,
+                                       cluster_name,
+                                       stage_name='setup_runtime_on_cluster',
+                                       digest=digest,
+                                       cluster_info=cluster_info,
+                                       ssh_credentials=ssh_credentials)
+    ran = [r for r in results if r is not None]
+    num_no_sshd = sum(ran)
+    if num_no_sshd:
+        logger.warning(
+            f'{num_no_sshd} of {len(ran)} nodes have no sshd: ssh to '
+            'the cluster, VS Code and mpirun/pdsh between nodes will not '
+            'work. Install openssh-server in the image.')
+
+
+def _ray_gpu_options(custom_resource: str) -> str:
+    """Returns GPU options for the ray start command.
+
+    For some cases (e.g., within docker container), we need to explicitly set
+    --num-gpus to have ray clusters recognize the schedulable GPUs.
+    """
+    acc_dict = json.loads(custom_resource)
+    assert len(acc_dict) == 1, acc_dict
+    acc_name, acc_count = list(acc_dict.items())[0]
+    if accelerator_registry.is_schedulable_non_gpu_accelerator(acc_name):
+        return ''
+    # We need to manually set the number of GPUs, as it may not automatically
+    # detect the GPUs within the container.
+    return f' --num-gpus={acc_count}'
+
+
+# Ray port flags shared by the head and worker start commands. The
+# ${VAR:-default} forms take the probed value when the hostNetwork probe
+# ran and the original constant otherwise; the ${VAR:+--flag=...} forms
+# vanish when unset, so non-hostNetwork bootstraps defer to Ray's own
+# defaults. Kept in one place so the head/worker flag sets can't drift.
+_SHARED_RAY_PORT_FLAGS = (
+    # Pin Ray's node IP to the address SkyPilot records (pod IP on K8s).
+    # Avoids multi-NIC / hostNetwork nodes reporting a different NIC to Ray.
+    '${SKYPILOT_RAY_NODE_IP:+--node-ip-address=$SKYPILOT_RAY_NODE_IP} '
+    '--object-manager-port=${SKYPILOT_RAY_OBJECT_MANAGER_PORT:-8076} '
+    '${SKYPILOT_RAY_NODE_MANAGER_PORT:+'
+    '--node-manager-port=$SKYPILOT_RAY_NODE_MANAGER_PORT} '
+    '${SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT:+'
+    '--dashboard-agent-listen-port='
+    '$SKYPILOT_RAY_DASHBOARD_AGENT_LISTEN_PORT} '
+    '${SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT:+'
+    '--runtime-env-agent-port=$SKYPILOT_RAY_RUNTIME_ENV_AGENT_PORT} '
+    '${SKYPILOT_RAY_METRICS_EXPORT_PORT:+'
+    '--metrics-export-port=$SKYPILOT_RAY_METRICS_EXPORT_PORT}')
+
+
+def ray_head_start_command(custom_resource: Optional[str],
+                           custom_ray_options: Optional[Dict[str, Any]]) -> str:
+    """Returns the command to start Ray on the head node."""
+    ray_options = (
+        # --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
+        f'--disable-usage-stats '
+        f'--port=${{SKYPILOT_RAY_PORT:-{constants.SKY_REMOTE_RAY_PORT}}} '
+        f'--dashboard-port=${{SKYPILOT_RAY_DASHBOARD_PORT:-'
+        f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}}} '
+        f'--min-worker-port 11002 '
+        f'{_SHARED_RAY_PORT_FLAGS} '
+        # Head-only: workers don't run the Ray Client server.
+        '${SKYPILOT_RAY_CLIENT_SERVER_PORT:+'
+        '--ray-client-server-port=$SKYPILOT_RAY_CLIENT_SERVER_PORT} '
+        f'--temp-dir={constants.SKY_REMOTE_RAY_TEMPDIR}')
+    if custom_resource:
+        ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
+    if custom_ray_options:
+        if 'use_external_ip' in custom_ray_options:
+            custom_ray_options.pop('use_external_ip')
+        for key, value in custom_ray_options.items():
+            ray_options += f' --{key}={value}'
+
+    cmd = (
+        _host_network_probe_cmd('head') + f'{constants.SKY_RAY_CMD} stop; '
+        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        # worker_maximum_startup_concurrency controls the maximum number of
+        # workers that can be started concurrently. However, it also controls
+        # this warning message:
+        # https://github.com/ray-project/ray/blob/d5d03e6e24ae3cfafb87637ade795fb1480636e6/src/ray/raylet/worker_pool.cc#L1535-L1545
+        # maximum_startup_concurrency defaults to the number of CPUs given by
+        # multiprocessing.cpu_count() or manually specified to ray. (See
+        # https://github.com/ray-project/ray/blob/fab26e1813779eb568acba01281c6dd963c13635/python/ray/_private/services.py#L1622-L1624.)
+        # The warning will show when the number of workers is >4x the
+        # maximum_startup_concurrency, so typically 4x CPU count. However, the
+        # job controller uses 0.25cpu reservations, and each job can use two
+        # workers (one for the submitted job and one for remote actors),
+        # resulting in a worker count of 8x CPUs or more. Increase the
+        # worker_maximum_startup_concurrency to 3x CPUs so that we will only see
+        # the warning when the worker count is >12x CPUs.
+        'RAY_worker_maximum_startup_concurrency=$(( 3 * $(nproc --all) )) '
+        f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
+        RAY_PRLIMIT + DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+    return cmd
+
+
+def ray_worker_start_command(custom_resource: Optional[str],
+                             custom_ray_options: Optional[Dict[str, Any]],
+                             no_restart: bool) -> str:
+    """Returns the command to start Ray on the worker node."""
+    # SKYPILOT_RAY_PORT is the head's GCS port — exported as a constant
+    # by the K8s template's worker bootstrap, or as the probed value
+    # (read from the head's ConfigMap) by the hostNetwork worker probe.
+    ray_options = ('--address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT} '
+                   f'{_SHARED_RAY_PORT_FLAGS}')
+
+    if custom_resource:
+        ray_options += f' --resources=\'{custom_resource}\''
+        ray_options += _ray_gpu_options(custom_resource)
+
+    if custom_ray_options:
+        for key, value in custom_ray_options.items():
+            ray_options += f' --{key}={value}'
+
+    cmd = (
+        'RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 '
+        f'{constants.SKY_RAY_CMD} start --disable-usage-stats {ray_options} || '
+        'exit 1;' + RAY_PRLIMIT)
+    if no_restart:
+        # We do not use ray status to check whether ray is running, because
+        # on worker node, if the user started their own ray cluster, ray status
+        # will return 0, i.e., we don't know skypilot's ray cluster is running.
+        # Instead, we check whether the raylet process is running on gcs address
+        # that is connected to the head with the correct port.
+        #
+        # The probe goes INSIDE this guard. It asserts the assigned host ports
+        # are free before ray binds them, so it only has something to assert
+        # when we are about to start ray: on a retry where ray is already up,
+        # those ports are held by our own raylet and the assertion fails
+        # against itself. Seen on the recovery path -- the worker rejoined and
+        # the cluster was healthy, but the launch reported failure.
+        cmd = (
+            f'ps aux | grep "ray/raylet/raylet" | '
+            'grep "gcs-address=${SKYPILOT_RAY_HEAD_IP}:${SKYPILOT_RAY_PORT}" '
+            f'|| {{ {_host_network_probe_cmd("worker")}{cmd} }}')
+        return cmd
+    # `ray stop` first, so the ports really are free by the time the probe
+    # runs and the assertion means what it says.
+    cmd = f'{constants.SKY_RAY_CMD} stop; ' + cmd
+    return _host_network_probe_cmd('worker') + cmd
+
+
+@common.log_function_start_end
+@_auto_retry()
+@timeline.event
+def start_ray_on_head_node(cluster_name: str, custom_resource: Optional[str],
+                           cluster_info: common.ClusterInfo,
+                           ssh_credentials: Dict[str, Any]) -> None:
+    """Start Ray on the head node."""
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    head_runner = runners[0]
+    assert cluster_info.head_instance_id is not None, (cluster_name,
+                                                       cluster_info)
+
+    # Log the head node's output to the provision.log
+    log_path_abs = str(provision_logging.get_log_path())
+    cmd = ray_head_start_command(custom_resource,
+                                 cluster_info.custom_ray_options)
+    logger.info(f'Running command on head node: {cmd}')
+    # TODO(zhwu): add the output to log files.
+    returncode, stdout, stderr = head_runner.run(
+        cmd,
+        stream_logs=False,
+        log_path=log_path_abs,
+        require_outputs=True,
+        # Source bashrc for starting ray cluster to make sure actors started by
+        # ray will have the correct PATH.
+        source_bashrc=True,
+        timeout=_setup_command_timeout())
+    if returncode:
+        raise RuntimeError('Failed to start ray on the head node '
+                           f'(exit code {returncode}). Error: \n'
+                           f'===== stdout ===== \n{stdout}\n'
+                           f'===== stderr ====={stderr}')
+
+
+@common.log_function_start_end
+@_auto_retry()
+@timeline.event
+def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
+                              custom_resource: Optional[str], ray_port: int,
+                              cluster_info: common.ClusterInfo,
+                              ssh_credentials: Dict[str, Any]) -> None:
+    """Start Ray on the worker nodes."""
+    if cluster_info.num_instances <= 1:
+        return
+    _hint_worker_log_path(cluster_name, cluster_info, 'ray_cluster')
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    worker_runners = runners[1:]
+    worker_instances = cluster_info.get_worker_instances()
+    cache_ids = []
+    prev_instance_id = None
+    cnt = 0
+    for instance in worker_instances:
+        if instance.instance_id != prev_instance_id:
+            cnt = 0
+            prev_instance_id = instance.instance_id
+        cache_ids.append(f'{prev_instance_id}-{cnt}')
+        cnt += 1
+
+    head_instance = cluster_info.get_head_instance()
+    assert head_instance is not None, cluster_info
+    use_external_ip = False
+    if cluster_info.custom_ray_options:
+        # Some cloud providers, e.g. fluidstack, cannot connect to the internal
+        # IP of the head node from the worker nodes. In this case, we need to
+        # use the external IP of the head node.
+        use_external_ip = cluster_info.custom_ray_options.pop(
+            'use_external_ip', False)
+
+    if use_external_ip:
+        head_ip = head_instance.external_ip
+    else:
+        # For Kubernetes, use the internal service address of the head node.
+        # Keep this consistent with the logic in kubernetes-ray.yml.j2
+        if head_instance.internal_svc:
+            head_ip = head_instance.internal_svc
+        else:
+            head_ip = head_instance.internal_ip
+
+    ray_cmd = ray_worker_start_command(custom_resource,
+                                       cluster_info.custom_ray_options,
+                                       no_restart)
+
+    cmd = (f'export SKYPILOT_RAY_HEAD_IP="{head_ip}"; '
+           f'export SKYPILOT_RAY_PORT={ray_port}; ' + ray_cmd)
+
+    logger.info(f'Running command on worker nodes: {cmd}')
+
+    def _setup_ray_worker(runner_and_id: Tuple[command_runner.CommandRunner,
+                                               str]):
+        runner, instance_id = runner_and_id
+        log_dir = metadata_utils.get_instance_log_dir(cluster_name, instance_id)
+        log_path_abs = str(log_dir / ('ray_cluster' + '.log'))
+        return runner.run(
+            cmd,
+            stream_logs=False,
+            require_outputs=True,
+            log_path=log_path_abs,
+            # Source bashrc for starting ray cluster to make sure actors started
+            # by ray will have the correct PATH.
+            source_bashrc=True,
+            timeout=_setup_command_timeout())
+
+    num_threads = subprocess_utils.get_parallel_threads(
+        cluster_info.provider_name)
+    results = subprocess_utils.run_in_parallel(
+        _setup_ray_worker, list(zip(worker_runners, cache_ids)), num_threads)
+    for returncode, stdout, stderr in results:
+        if returncode:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Failed to start ray on the worker node '
+                                   f'(exit code {returncode}). \n'
+                                   'Detailed Error: \n'
+                                   f'===== stdout ===== \n{stdout}\n'
+                                   f'===== stderr ====={stderr}')
+
+
+@common.log_function_start_end
+@_auto_retry()
+@timeline.event
+def start_skylet_on_head_node(
+        cluster_name: resources_utils.ClusterName,
+        cluster_info: common.ClusterInfo, ssh_credentials: Dict[str, Any],
+        launched_resources: resources_lib.Resources) -> None:
+    """Start skylet on the head node."""
+    # Avoid circular import.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import controller_utils
+
+    def _set_skypilot_env_var_cmd() -> str:
+        """Sets the skypilot environment variables on the remote machine."""
+        env_vars = {
+            k: str(v) for (k, v) in env_options.Options.all_options().items()
+        }
+        is_controller = controller_utils.Controllers.from_name(
+            cluster_name.display_name) is not None
+        is_kubernetes = cluster_info.provider_name == 'kubernetes'
+        if is_controller and is_kubernetes:
+            # For jobs/serve controller, we pass in the CPU and memory limits
+            # when starting the skylet to handle cases where these env vars
+            # are not set on the cluster's pod spec. The skylet will read
+            # these env vars when starting (ManagedJobEvent.start()) and write
+            # it to disk.
+            resources = launched_resources.assert_launchable()
+            vcpus, mem = resources.cloud.get_vcpus_mem_from_instance_type(
+                resources.instance_type)
+            if vcpus is not None:
+                env_vars['SKYPILOT_POD_CPU_CORE_LIMIT'] = str(vcpus)
+            if mem is not None:
+                env_vars['SKYPILOT_POD_MEMORY_GB_LIMIT'] = str(mem)
+
+        # Cluster placement, accelerator, and provenance context for
+        # skylet's heartbeat event (sky/skylet/events.py:
+        # UsageHeartbeatReportEvent). cloud / region / zone / instance_type
+        # / use_spot come from launched_resources directly — they reflect
+        # the actual placement and aren't on cluster_info. The user hash
+        # comes from the orchestrator process so the heartbeat carries
+        # the launching user, not whatever identity the head node would
+        # generate on its own.
+        env_vars['SKYPILOT_HEARTBEAT_NUM_NODES'] = str(
+            cluster_info.num_instances)
+        env_vars['SKYPILOT_HEARTBEAT_USER'] = common_utils.get_user_hash()
+        env_vars['SKYPILOT_HEARTBEAT_USE_SPOT'] = (
+            '1' if launched_resources.use_spot else '0')
+        if launched_resources.cloud is not None:
+            env_vars['SKYPILOT_HEARTBEAT_CLOUD'] = str(launched_resources.cloud)
+        if launched_resources.region is not None:
+            env_vars['SKYPILOT_HEARTBEAT_REGION'] = launched_resources.region
+        if launched_resources.zone is not None:
+            env_vars['SKYPILOT_HEARTBEAT_ZONE'] = launched_resources.zone
+        if launched_resources.instance_type is not None:
+            env_vars['SKYPILOT_HEARTBEAT_INSTANCE_TYPE'] = (
+                launched_resources.instance_type)
+        accelerators = launched_resources.accelerators or {}
+        if accelerators:
+            gpu_type, count = next(iter(accelerators.items()))
+            env_vars['SKYPILOT_HEARTBEAT_GPU_TYPE'] = str(gpu_type)
+            env_vars['SKYPILOT_HEARTBEAT_GPUS_PER_NODE'] = str(int(count))
+
+        # Quote values so shell metacharacters in any field (e.g. an
+        # exotic K8s context derived region/zone, a hyphenated GPU type,
+        # or a future env var that carries a path or sentence) cannot
+        # break the export. shlex.quote is a no-op on plain alphanumerics.
+        return '; '.join(
+            f'export {k}={shlex.quote(v)}' for k, v in env_vars.items())
+
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    head_runner = runners[0]
+    assert cluster_info.head_instance_id is not None, cluster_info
+    log_path_abs = str(provision_logging.get_log_path())
+    logger.info(f'Running command on head node: {MAYBE_SKYLET_RESTART_CMD}')
+    # We need to source bashrc for skylet to make sure the idle-timer
+    # (stop/down) event handler can access the path to the cloud CLIs.
+    set_usage_run_id_cmd = _set_usage_run_id_cmd()
+    # Set the skypilot environment variables, including the usage type, debug
+    # info, other options, and cluster identity / accelerator context for
+    # skylet's heartbeat event.
+    set_skypilot_env_var_cmd = _set_skypilot_env_var_cmd()
+    returncode, stdout, stderr = head_runner.run(
+        f'{set_usage_run_id_cmd}; {set_skypilot_env_var_cmd}; '
+        f'{MAYBE_SKYLET_RESTART_CMD}',
+        stream_logs=False,
+        require_outputs=True,
+        log_path=log_path_abs,
+        source_bashrc=True,
+        timeout=_setup_command_timeout())
+    if returncode:
+        raise RuntimeError('Failed to start skylet on the head node '
+                           f'(exit code {returncode}). Error: '
+                           f'===== stdout ===== \n{stdout}\n'
+                           f'===== stderr ====={stderr}')
+
+
+@_auto_retry()
+def _internal_file_mounts(file_mounts: Dict,
+                          runner: command_runner.CommandRunner,
+                          log_path: str) -> None:
+    if not file_mounts:
+        return
+
+    for dst, src in file_mounts.items():
+        # TODO: We should use this trick to speed up file mounting:
+        # https://stackoverflow.com/questions/1636889/how-can-i-configure-rsync-to-create-target-directory-on-remote-server
+        full_src = os.path.abspath(os.path.expanduser(src))
+
+        if os.path.isfile(full_src):
+            mkdir_command = f'mkdir -p {os.path.dirname(dst)}'
+        else:
+            mkdir_command = f'mkdir -p {dst}'
+        rc, stdout, stderr = runner.run_setup(mkdir_command,
+                                              log_path=log_path,
+                                              stream_logs=False,
+                                              require_outputs=True,
+                                              timeout=_file_mount_timeout())
+        subprocess_utils.handle_returncode(
+            rc,
+            mkdir_command, ('Failed to run command before rsync '
+                            f'{src} -> {dst}.'),
+            stderr=stdout + stderr)
+
+        runner.rsync_setup(
+            source=src,
+            target=dst,
+            up=True,
+            log_path=log_path,
+            stream_logs=False,
+            timeout=_file_mount_timeout(),
+        )
+
+
+@common.log_function_start_end
+@timeline.event
+def internal_file_mounts(cluster_name: str, common_file_mounts: Dict[str, str],
+                         cluster_info: common.ClusterInfo,
+                         ssh_credentials: Dict[str, str]) -> None:
+    """Executes file mounts - rsyncing internal local files"""
+    _hint_worker_log_path(cluster_name, cluster_info, 'internal_file_mounts')
+
+    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
+        _internal_file_mounts(common_file_mounts, runner, log_path)
+
+    _parallel_ssh_with_cache(
+        _setup_node,
+        cluster_name,
+        stage_name='internal_file_mounts',
+        # Do not cache the file mounts, as the cloud
+        # credentials may change, and we should always
+        # update the remote files. The internal file_mounts
+        # is minimal and should not take too much time.
+        digest=None,
+        cluster_info=cluster_info,
+        ssh_credentials=ssh_credentials,
+        max_workers=subprocess_utils.get_max_workers_for_file_mounts(
+            common_file_mounts, cluster_info.provider_name))
+
+
+class LoggingAgentUnsupportedError(RuntimeError):
+    """The logging agent cannot be installed on a node's platform."""
+
+
+@common.log_function_start_end
+@timeline.event
+def setup_logging_on_cluster(logging_agent: logs.LoggingAgent,
+                             cluster_name: resources_utils.ClusterName,
+                             cluster_info: common.ClusterInfo,
+                             ssh_credentials: Dict[str, Any]) -> None:
+    """Setup logging agent (fluentbit) on all nodes after provisioning."""
+    _hint_worker_log_path(cluster_name.name_on_cloud, cluster_info,
+                          'logging_setup')
+
+    @_auto_retry(
+        should_retry=lambda e: not isinstance(e, LoggingAgentUnsupportedError))
+    def _setup_node(runner: command_runner.CommandRunner, log_path: str):
+        cmd = logging_agent.get_setup_command(cluster_name)
+        logger.info(f'Running command on node: {cmd}')
+        returncode, stdout, stderr = runner.run(
+            cmd,
+            stream_logs=False,
+            require_outputs=True,
+            log_path=log_path,
+            source_bashrc=True,
+            timeout=_setup_command_timeout())
+        if returncode == logs_agent.UNSUPPORTED_PLATFORM_EXIT_CODE:
+            # The runner merges stderr into stdout unless asked not to.
+            reason = [
+                line[len('SkyPilot: '):]
+                for line in f'{stdout}\n{stderr}'.splitlines()
+                if line.startswith('SkyPilot: ')
+            ]
+            raise LoggingAgentUnsupportedError(
+                reason[-1]
+                if reason else 'cannot install fluent-bit on this node')
+        if returncode:
+            raise RuntimeError(f'Failed to setup logging agent\n{cmd}\n'
+                               f'(exit code {returncode}). Error: '
+                               f'===== stdout ===== \n{stdout}\n'
+                               f'===== stderr ====={stderr}')
+
+    _parallel_ssh_with_cache(_setup_node,
+                             cluster_name.name_on_cloud,
+                             stage_name='logging_setup',
+                             digest=None,
+                             cluster_info=cluster_info,
+                             ssh_credentials=ssh_credentials)

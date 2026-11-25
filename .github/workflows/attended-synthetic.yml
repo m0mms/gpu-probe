@@ -1,102 +1,48 @@
-name: One attended synthetic image build and publication
+name: One CPU-only qualification
 on:
   workflow_dispatch:
     inputs:
       expected_sha:
-        description: Reviewed exact source commit
+        description: Exact reviewed source commit
         required: true
         type: string
 permissions:
   contents: read
-  packages: write
 concurrency:
-  group: gpu-probe-serverless-validation
+  group: gpu-probe-cpu-qualification
   cancel-in-progress: false
-env:
-  DOCKER_BUILD_RECORD_UPLOAD: 'false'
-  PYTHONDONTWRITEBYTECODE: '1'
 jobs:
-  validate:
-    if: github.repository == 'm0mms/gpu-probe' && github.sha == vars.ATTENDED_SYNTHETIC_SHA && github.run_attempt == 1
+  qualify:
+    if: github.repository == 'm0mms/gpu-probe' && github.sha == vars.CPU_QUALIFICATION_SHA && github.run_attempt == 1
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     defaults:
       run:
-        working-directory: serverless
+        working-directory: cpu-qualification
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      REVIEWED_SHA: ${{ vars.CPU_QUALIFICATION_SHA }}
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Offline local gates
+        run: python3 -B -m unittest discover -v
       - name: Exact source and capacity admission
-        env:
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
-          REVIEWED_SHA: ${{ vars.ATTENDED_SYNTHETIC_SHA }}
-        run: python3 ci/preflight.py
-      - name: Local gates
-        run: |
-          python3 -m unittest discover -s ci -p 'test_*.py' -v
-          python3 -m unittest discover -s image -p 'test_*.py' -v
-          python3 image/check_context.py
-      - id: builder
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
-        with:
-          driver: docker-container
-          buildkitd-flags: --oci-worker-gc
-          driver-opts: |
-            memory=4g
-            memory-swap=4g
-            cpu-period=100000
-            cpu-quota=200000
-      - name: Verify builder limits
-        env:
-          BUILDER_NODES: ${{ steps.builder.outputs.nodes }}
-        run: python3 ci/builder.py
-      - id: build
-        name: Build only; no registry publication
-        timeout-minutes: 15
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
-        with:
-          context: ./serverless/image
-          file: ./serverless/image/Dockerfile.candidate
-          platforms: linux/amd64
-          push: false
-          load: true
-          provenance: false
-          sbom: false
-      - name: Installed SDK and CPU-only compiler controls
-        env:
-          BUILT_IMAGE_ID: ${{ steps.build.outputs.imageid }}
-        run: python3 ci/runtime_check.py
-      - name: CPU-only filesystem and library evidence
-        if: always() && steps.build.outcome == 'success'
-        env:
-          BUILT_IMAGE_ID: ${{ steps.build.outputs.imageid }}
-        run: python3 ci/evidence_capture.py
-      - id: scanner
-        if: always() && steps.build.outcome == 'success'
-        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
-        with:
-          version: v0.76.1
-          cache: 'false'
-      - name: OS and Python vulnerability coverage
-        id: security
-        continue-on-error: true
-        if: always() && steps.build.outcome == 'success' && steps.scanner.outcome == 'success'
-        env:
-          BUILT_IMAGE_ID: ${{ steps.build.outputs.imageid }}
-        run: python3 ci/security_scan.py
-      - name: One-campaign exception and publication
-        if: success() && steps.security.outcome != 'skipped'
-        env:
-          BUILT_IMAGE_ID: ${{ steps.build.outputs.imageid }}
-          PUBLISH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 ci/publish_attended.py
-      - name: Preserve local validation evidence
+        run: python3 -B campaign.py preflight
+      - name: Fetch hash-locked public inputs
+        run: timeout --signal=TERM --kill-after=2s 300s python3 -B fetch.py
+      - name: Load only hash-verified local base images
+        run: timeout --signal=TERM --kill-after=2s 360s python3 -B base_images.py
+      - name: One worker then one controller qualification
+        run: python3 -B campaign.py
+      - name: Preserve bounded evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: attended-synthetic-${{ github.run_id }}-${{ github.run_attempt }}
-          path: serverless/evidence/*.json
+          name: cpu-qualification-${{ github.run_id }}
+          path: cpu-qualification/evidence/*.json
           if-no-files-found: warn
           retention-days: 14
