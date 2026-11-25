@@ -1,7 +1,7 @@
 """Fetch only locked public inputs, with an aggregate byte budget and no retries."""
 import hashlib,json,urllib.request,urllib.parse
 from pathlib import Path
-ALLOWED={'pypi.org','files.pythonhosted.org','deb.debian.org','codeload.github.com','ghcr.io','auth.docker.io','registry-1.docker.io'}
+ALLOWED={'pypi.org','files.pythonhosted.org','deb.debian.org','security.debian.org','codeload.github.com','ghcr.io','auth.docker.io','registry-1.docker.io'}
 class Redirect(urllib.request.HTTPRedirectHandler):
  def redirect_request(self,req,fp,code,msg,headers,newurl):
   u=urllib.parse.urlparse(newurl)

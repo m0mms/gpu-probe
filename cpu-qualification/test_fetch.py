@@ -1,4 +1,5 @@
-import hashlib,io,unittest
+import hashlib,io,unittest,json
+from pathlib import Path
 from fetch import Fetch
 class Response(io.BytesIO):
  def __init__(self,data):super().__init__(data);self.headers={"Content-Length":str(len(data))};self.consumed=0
@@ -24,4 +25,19 @@ class Tests(unittest.TestCase):
  def test_unknown_host_refused_before_read(self):
   f=Fetch(100,0)
   with self.assertRaises(ValueError):f.get('https://example.org/a',3,io.BytesIO())
+class ManifestTests(unittest.TestCase):
+ def test_all_locked_input_urls_pass_real_fetch_policy(self):
+  lock=json.loads((Path(__file__).parent/'inputs.json').read_text())
+  self.assertEqual(len(lock['files']),168)
+  for entry in lock['files']:
+   url=entry.get('url') or entry['metadata_url']
+   with self.subTest(name=entry['name'],url=url):
+    f=Fetch(1,0);f.opener=Opener(b'x')
+    self.assertEqual(f.get(url,1,io.BytesIO()),(1,hashlib.sha256(b'x').hexdigest()))
+ def test_debian_security_variants_still_refused(self):
+  for url in ('http://security.debian.org/a','https://security.debian.org.evil.example/a','https://evil.security.debian.org/a'):
+   with self.subTest(url=url):
+    f=Fetch(1,0);f.opener=Opener(b'x')
+    with self.assertRaises(ValueError):f.get(url,1,io.BytesIO())
+    self.assertFalse(hasattr(f.opener,'response'))
 if __name__=='__main__':unittest.main()
