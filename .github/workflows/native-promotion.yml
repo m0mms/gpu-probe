@@ -1,0 +1,62 @@
+name: Exact synthetic worker promotion
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  packages: write
+concurrency:
+  group: exact-native-worker-promotion
+  cancel-in-progress: false
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      REVIEWED_SHA: ${{ vars.NATIVE_PROMOTION_SHA }}
+      ACCEPTANCE_EXPIRES: ${{ vars.NATIVE_PROMOTION_ACCEPTANCE_EXPIRES }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Offline checks
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s promotion -p 'test_*.py' -v
+      - name: Promote only the retained exact worker
+        env:
+          PUBLICATION_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_SHA" = "$EXPECTED_SHA"
+          test "$GITHUB_SHA" = "$REVIEWED_SHA"
+          umask 077
+          credential=$(mktemp /dev/shm/native-publication.XXXXXX)
+          trap 'rm -f -- "$credential"' EXIT
+          printf '%s' "$PUBLICATION_TOKEN" > "$credential"
+          unset PUBLICATION_TOKEN
+          mkdir -p "$GITHUB_WORKSPACE/promotion-evidence"
+          sudo systemd-run --wait --collect --unit="gpu-native-promotion-$GITHUB_RUN_ID" \
+            -p MemoryMax=2147483648 -p MemorySwapMax=0 -p CPUQuota=200% \
+            -p TasksMax=256 -p RuntimeMaxSec=180 -p TimeoutStopSec=2 \
+            -p KillMode=control-group -p Restart=no -p UMask=0077 \
+            -p "LoadCredential=github-token:$credential" \
+            --setenv="GITHUB_REPOSITORY=$GITHUB_REPOSITORY" \
+            --setenv="GITHUB_SHA=$GITHUB_SHA" --setenv="GITHUB_RUN_ATTEMPT=$GITHUB_RUN_ATTEMPT" \
+            --setenv="GITHUB_ACTOR=$GITHUB_ACTOR" --setenv="EXPECTED_SHA=$EXPECTED_SHA" \
+            --setenv="REVIEWED_SHA=$REVIEWED_SHA" --setenv="ACCEPTANCE_EXPIRES=$ACCEPTANCE_EXPIRES" \
+            --setenv="PROMOTION_UNIT=gpu-native-promotion-$GITHUB_RUN_ID.service" \
+            --setenv="EVIDENCE=$GITHUB_WORKSPACE/promotion-evidence" \
+            /usr/bin/python3 -I -B "$GITHUB_WORKSPACE/promotion/promote.py"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-promotion-evidence-${{ github.run_id }}
+          path: promotion-evidence/*.json
+          retention-days: 14
+          if-no-files-found: warn
