@@ -3,6 +3,10 @@ from pathlib import Path
 from unittest.mock import patch
 import promote as p
 class Tests(unittest.TestCase):
+ def test_bounded_stdin_token(self):
+  self.assertEqual(p.read_token(io.BytesIO(b'synthetic-token')),'synthetic-token')
+  for raw in (b'',b'x'*65537,b'token\n',b'token\x00',bytes([255])):
+   with self.assertRaises(ValueError):p.read_token(io.BytesIO(raw))
  def test_artifact_binding(self):
   v={'id':p.ARTIFACT,'expired':False,'digest':'sha256:'+p.ZIP_HASH,'workflow_run':{'id':p.RUN,'head_sha':p.SOURCE}}
   p.artifact_identity(v)
