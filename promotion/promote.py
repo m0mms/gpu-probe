@@ -66,20 +66,31 @@ def registry(tag):
 def require_acceptance(until,now,remaining):
  need(now+remaining<float(until),'acceptance must cover remaining operation')
 def disk_bytes(root):
+ root=Path(root)
+ initial=root.stat(follow_symlinks=False)
+ need(__import__('stat').S_ISDIR(initial.st_mode),'workspace identity')
  total=0
- def failed(error):raise error
+ def failed(error):
+  # A concurrently removed directory no longer consumes sampled workspace bytes.
+  # Match the existing disappearing-file handling; other I/O errors still refuse.
+  if isinstance(error,FileNotFoundError) and isinstance(error.filename,str):
+   missing=Path(error.filename)
+   if missing!=root and '..' not in missing.parts and missing.is_relative_to(root):return
+  raise error
  for base,dirs,files in os.walk(root,followlinks=False,onerror=failed):
   for name in files:
    try:
     st=os.lstat(os.path.join(base,name))
    except FileNotFoundError:continue
    if __import__('stat').S_ISREG(st.st_mode):total+=st.st_size
+ final=root.stat(follow_symlinks=False)
+ need((initial.st_dev,initial.st_ino)==(final.st_dev,final.st_ino),'workspace changed')
  return total
 def monitor_observation(root,elapsed):
  try:
   size=disk_bytes(root)
   return {'reason':'disk_limit' if size>5000000000 else 'elapsed_limit' if elapsed>=175 else 'within_limits','bytes':size}
- except Exception:return {'reason':'disk_observation_failed','bytes':None}
+ except Exception as error:return {'reason':'disk_observation_failed','bytes':None,'error_family':'os_error' if isinstance(error,OSError) else 'other','errno':error.errno if isinstance(error,OSError) and type(error.errno) is int else None}
 def monitor_check(root,elapsed):return monitor_observation(root,elapsed)['reason']=='within_limits'
 def export_evidence(path,value):
  # Only explicit sanitized JSON schemas reach this function; no command logs.
