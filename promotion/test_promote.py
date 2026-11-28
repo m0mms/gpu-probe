@@ -37,6 +37,10 @@ class Tests(unittest.TestCase):
   with patch.object(p,'disk_bytes',side_effect=PermissionError()):self.assertFalse(p.monitor_check('/unused',1))
   with patch.object(p,'disk_bytes',return_value=5000000001):self.assertFalse(p.monitor_check('/unused',1))
   with patch.object(p,'disk_bytes',return_value=0):self.assertFalse(p.monitor_check('/unused',175))
+ def test_monitor_diagnostics_are_distinct_and_sanitized(self):
+  for size,elapsed,reason in [(5000000001,1,'disk_limit'),(0,175,'elapsed_limit'),(0,1,'within_limits')]:
+   with patch.object(p,'disk_bytes',return_value=size):self.assertEqual(p.monitor_observation('/unused',elapsed),{'reason':reason,'bytes':size})
+  with patch.object(p,'disk_bytes',side_effect=PermissionError('secret path')):self.assertEqual(p.monitor_observation('/unused',1),{'reason':'disk_observation_failed','bytes':None})
  def test_scandir_failure_refuses_monitoring(self):
   with patch.object(p.os,'scandir',side_effect=PermissionError()):self.assertFalse(p.monitor_check('/unused',1))
  def test_disappearing_file_is_tolerated(self):
