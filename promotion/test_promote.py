@@ -40,11 +40,20 @@ class Tests(unittest.TestCase):
  def test_monitor_diagnostics_are_distinct_and_sanitized(self):
   for size,elapsed,reason in [(5000000001,1,'disk_limit'),(0,175,'elapsed_limit'),(0,1,'within_limits')]:
    with patch.object(p,'disk_bytes',return_value=size):self.assertEqual(p.monitor_observation('/unused',elapsed),{'reason':reason,'bytes':size})
-  with patch.object(p,'disk_bytes',side_effect=PermissionError('secret path')):self.assertEqual(p.monitor_observation('/unused',1),{'reason':'disk_observation_failed','bytes':None})
+  with patch.object(p,'disk_bytes',side_effect=PermissionError('secret path')):self.assertEqual(p.monitor_observation('/unused',1),{'reason':'disk_observation_failed','bytes':None,'error_family':'os_error','errno':None})
  def test_scandir_failure_refuses_monitoring(self):
   with patch.object(p.os,'scandir',side_effect=PermissionError()):self.assertFalse(p.monitor_check('/unused',1))
+ def test_disappearing_directory_is_tolerated(self):
+  with tempfile.TemporaryDirectory() as root:
+   with patch.object(p.os,'scandir',side_effect=FileNotFoundError(2,'vanished',root+'/child')):self.assertEqual(p.disk_bytes(root),0)
+   with patch.object(p.os,'scandir',side_effect=FileNotFoundError(2,'vanished',root)):self.assertFalse(p.monitor_check(root,1))
+ def test_other_io_failure_remains_closed(self):
+  for error in (PermissionError(13,'private path'),OSError(5,'private path')):
+   with tempfile.TemporaryDirectory() as root,patch.object(p.os,'scandir',side_effect=error):
+    result=p.monitor_observation(root,1);self.assertEqual(result['reason'],'disk_observation_failed');self.assertEqual(result['errno'],error.errno);self.assertNotIn('private',str(result))
  def test_disappearing_file_is_tolerated(self):
-  with patch.object(p.os,'walk',return_value=[('/tmp',[],['gone'])]),patch.object(p.os,'lstat',side_effect=FileNotFoundError()):self.assertEqual(p.disk_bytes('/tmp'),0)
+  with tempfile.TemporaryDirectory() as root:
+   with patch.object(p.os,'walk',return_value=[(root,[],['gone'])]),patch.object(p.os,'lstat',side_effect=FileNotFoundError()):self.assertEqual(p.disk_bytes(root),0)
  def test_evidence_is_readable_and_sanitized(self):
   with tempfile.TemporaryDirectory() as d:
    f=Path(d)/'failure.json';p.export_evidence(f,{'stage':'push','failure_class':'ValueError'})
