@@ -75,9 +75,12 @@ def disk_bytes(root):
    except FileNotFoundError:continue
    if __import__('stat').S_ISREG(st.st_mode):total+=st.st_size
  return total
-def monitor_check(root,elapsed):
- try:return disk_bytes(root)<=5000000000 and elapsed<175
- except Exception:return False
+def monitor_observation(root,elapsed):
+ try:
+  size=disk_bytes(root)
+  return {'reason':'disk_limit' if size>5000000000 else 'elapsed_limit' if elapsed>=175 else 'within_limits','bytes':size}
+ except Exception:return {'reason':'disk_observation_failed','bytes':None}
+def monitor_check(root,elapsed):return monitor_observation(root,elapsed)['reason']=='within_limits'
 def export_evidence(path,value):
  # Only explicit sanitized JSON schemas reach this function; no command logs.
  path.write_text(json.dumps(value,indent=2)+'\n');path.chmod(0o644)
@@ -100,10 +103,13 @@ def main():
  # Do not pass the credential input descriptor to any later child.
  with open(os.devnull,'rb') as null:os.dup2(null.fileno(),0)
  env=dict(os.environ,GH_TOKEN=token,DOCKER_HOST='unix://'+str(root/'docker.sock'),DOCKER_CONFIG=str(auth),HOME=str(root/'home'))
- (root/'home').mkdir();started=time.monotonic();done=threading.Event();stage='precheck';daemon=None
+ (root/'home').mkdir();started=time.monotonic();done=threading.Event();stage='precheck';daemon=None;monitor_failure=None
  def watch():
+  nonlocal monitor_failure
   while not done.wait(.2):
-   if not monitor_check(root,time.monotonic()-started):os.kill(os.getpid(),signal.SIGTERM);return
+   observation=monitor_observation(root,time.monotonic()-started)
+   if observation['reason']!='within_limits':
+    monitor_failure=observation;os.kill(os.getpid(),signal.SIGTERM);return
  def abort(*_):raise TimeoutError('promotion bound')
  signal.signal(signal.SIGTERM,abort);threading.Thread(target=watch,daemon=True).start()
  resource.setrlimit(resource.RLIMIT_FSIZE,(1073741824,1073741824))
@@ -130,15 +136,17 @@ def main():
   run(['docker','load','--input',str(root/'worker-image.tar')])
   loaded=json.loads(run(['docker','image','inspect',CONFIG]))
   need(len(loaded)==1 and loaded[0]['Id']==CONFIG,'loaded image identity')
-  run(['docker','tag',CONFIG,TARGET]);stage='push'
+  run(['docker','tag',CONFIG,TARGET]);stage='login'
   run(['docker','login','ghcr.io','--username',os.environ['GITHUB_ACTOR'],'--password-stdin'],stdin=token.encode())
   require_acceptance(os.environ['ACCEPTANCE_EXPIRES'],time.time(),max(0,180-(time.monotonic()-started)))
+  stage='prepush_registry'
   need(registry(TARGET.split(':')[-1]) is None,'target appeared before push')
+  stage='push'
   run(['docker','push',TARGET]);stage='verify'
   binding=registry(TARGET.split(':')[-1]);need(binding and binding['config']==config,'registry binding')
   export_evidence(evidence/'binding.json',{'target':TARGET,'archive_sha256':ARCHIVE_HASH,'config_digest':CONFIG,'registry_manifest_digest':binding['manifest_digest'],'source_run':RUN,'source_commit':SOURCE,'promotion_commit':os.environ['GITHUB_SHA'],'verified':True})
  except BaseException as e:
-  export_evidence(evidence/'failure.json',{'stage':stage,'failure_class':type(e).__name__,'automatic_retry':False,'publication_may_have_happened':stage in ('push','verify')});raise
+  export_evidence(evidence/'failure.json',{'stage':stage,'failure_class':type(e).__name__,'automatic_retry':False,'publication_may_have_happened':stage in ('push','verify'),'elapsed_seconds':round(time.monotonic()-started,3),'monitor_failure':monitor_failure});raise
  finally:
   done.set()
   if daemon and daemon.poll() is None:
