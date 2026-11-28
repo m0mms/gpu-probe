@@ -81,6 +81,11 @@ def monitor_check(root,elapsed):
 def export_evidence(path,value):
  # Only explicit sanitized JSON schemas reach this function; no command logs.
  path.write_text(json.dumps(value,indent=2)+'\n');path.chmod(0o644)
+def read_token(stream):
+ raw=stream.read(65537)
+ need(0<len(raw)<=65536 and all(33<=b<=126 for b in raw),'publication token input')
+ return raw.decode('ascii')
+
 def main():
  need(os.environ['GITHUB_REPOSITORY']==REPO and os.environ['GITHUB_RUN_ATTEMPT']=='1','CI scope')
  need(os.environ['GITHUB_SHA']==os.environ['REVIEWED_SHA']==os.environ['EXPECTED_SHA'],'reviewed commit')
@@ -91,7 +96,9 @@ def main():
  need(set(props.splitlines())=={'MemoryMax=2147483648','MemorySwapMax=0','TasksMax=256','CPUQuotaPerSecUSec=2s','RuntimeMaxUSec=3min'},'CI resource controls')
  root=Path(tempfile.mkdtemp(prefix='native-promotion-',dir='/tmp'));auth=Path(tempfile.mkdtemp(prefix='native-auth-',dir='/dev/shm'))
  evidence=Path(os.environ['EVIDENCE']);evidence.mkdir(exist_ok=True)
- token=Path(os.environ['CREDENTIALS_DIRECTORY'],'github-token').read_text().strip()
+ token=read_token(sys.stdin.buffer)
+ # Do not pass the credential input descriptor to any later child.
+ with open(os.devnull,'rb') as null:os.dup2(null.fileno(),0)
  env=dict(os.environ,GH_TOKEN=token,DOCKER_HOST='unix://'+str(root/'docker.sock'),DOCKER_CONFIG=str(auth),HOME=str(root/'home'))
  (root/'home').mkdir();started=time.monotonic();done=threading.Event();stage='precheck';daemon=None
  def watch():
